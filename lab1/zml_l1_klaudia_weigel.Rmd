@@ -1,0 +1,793 @@
+---
+title: "Zaawansowane modele liniowe - Lista 1"
+author: "Klaudia Weigel"
+output: 
+  pdf_document: 
+    fig_caption: yes
+    highlight: tango
+    number_sections: yes
+
+header_includes:
+  - \usepackage{amsmath}
+  - \usepackage{amssymb}
+  - \usepackage{amsthm}
+  - \usepackage{listings}
+  - \theoremstyle{definition}
+  - \usepackage{bbm}
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Analiza danych
+
+## Zadanie 1
+
+Mamy zbiór danych opisujący relację między prawdopodobieństwami przyjęcia na studia (success) a wynikami z testów rachunkowych (numeracy) i poziomem niepewności (anxiety).
+
+```{r}
+data = read.table("lista_1.csv", sep = ",", header = TRUE)
+data[1:5,]
+```
+
+Spójrzmy również na wykresy sukcesu w zależności od zmiennej *anxiety* oraz zmiennej *numeracy*.
+
+```{r, echo=FALSE}
+library(ggplot2)
+p1 = ggplot(data = data, aes(x=anxiety)) +
+  geom_point(aes(y=success))
+
+p2 = ggplot(data = data, aes(x=numeracy)) +
+  geom_point(aes(y=success))
+```
+
+```{r, fig.height=2.5, warning=FALSE, message=FALSE, echo=FALSE}
+cowplot::plot_grid(p1, p2)
+```
+
+Z wykresów możemy podejrzewać, iż istnieje związek pomiędzy sukcesem a wartościami *numeracy* i *anxiety*.
+
+## Zadanie 2
+
+Narysujemy teraz boxplot dla zmiennej *numeracy* w rozbiciu na grupę przyjętych/nieprzyjętych osób.
+
+```{r, out.width="300px", fig.align="center", echo=FALSE}
+ggplot(data = data, aes(x=as.factor(success), y=numeracy)) +
+  geom_boxplot() +
+  xlab("success")
+```
+
+
+Widzimy, że w grupie osób, które zostały przyjęte na studia mediana zmiennej *numeracy* jest wyższa niż w grupie nieprzyjętych. Połowa osób w grupie przyjętych osiąga wynik powyżej 12, gdzie w grupie nieprzyjętych taki wynik nie występuje. Sugeruje to, że dla ucznia, który osiągnął większy wynik *numeracy* prawdopodobieństwo przyjęcia na studia będzie większe.
+
+## Zadanie 3
+
+```{r, out.width="300px", fig.align="center", echo=FALSE}
+ggplot(data = data, aes(x=as.factor(success), y=anxiety)) +
+  geom_boxplot() +
+  xlab("success")
+```
+
+Tym razem mediana dla *anxiety* jest niższa w grupie osób przyjętych. Możemy podejrzewać, że uczeń z mniejszym indeksem *anxiety* będzie miał większe szanse na przyjęcie.
+
+
+## Zadanie 4
+
+Teoretyczny model regresji logistycznej z funkcją linkującą logit dla tego problemu to 
+$$
+\text{logit}(\mu_i) = \beta_0 + numeracy_i*\beta_1 +  anxiety_i*\beta_2,\quad \text{logit} = \text{log}\frac{\mu_i}{1-\mu_i},  \quad i=1,\dots,50.
+$$
+
+Do konstrukcji modelu wykorzystamy fukcję $\texttt{glm}$.
+
+```{r}
+reg = glm(success~numeracy + anxiety, data = data, family = "binomial")
+```
+Estymatory parametrów regresji
+
+```{r}
+reg$coefficients
+```
+
+Zatem nasz model to
+$$
+\text{logit}(\mu_i) = 14.239 + 0.577*numeracy_i -1.384*anxiety_i.
+$$
+
+Chcemy testować
+$$
+H_{0i}: \beta_i = 0 \quad H_{1i}: \beta_i \neq 0.
+$$
+Hipoteza testowa ma postać
+$$
+T = \frac{\hat{\beta_i}}{se(\hat{\beta_i})} = \frac{\hat{\beta_i}}{\sqrt{J_{ii}^{-1}}}, \quad J = X'S(\beta)X, \ S = \text{diag}(\hat{\mu}(1-\hat{\mu})).
+$$
+Gdzie $X$ to macierz planu. Statystyka T ma przy hipotezie zerowej asymptotycznie rozkład standardowy normalny. Test na poziomie istotności $\alpha$ odrzuca hipotezę zerową, gdy $T > |w_c| = \Phi^{-1}(1-\alpha/2)$.
+
+
+```{r}
+# p values of significance tests
+summary(reg)[['coefficients']][,"Pr(>|z|)"]
+```
+Na poziomie istotności 0.05 wszystkie parametry są istotne.  
+
+Przewidywane p-stwo sukcesu u studenta, którego *anxiety*= 13, a *numeracy*=10.
+```{r}
+predict.glm(reg, newdata = data.frame(numeracy=c(10), anxiety=c(13)), type = "response")
+```
+
+Prawdopodobieństwo, że taki student dostanie się na studia wynosi około 88%.  
+  
+
+* Krzywa ROC  
+
+Statystyka nazywana czułością (sensitivity or true positive rate (TPR)) to proporcja prawdziwych odkryć (poprawna klasyfikacja) do wszystkich możliwych prawdziwych odkryć na zbiorze sukcesów (klasyfikacja = 1). Analogicznie zdefiniowana jest specyficzność z tym, że na zbiorze porażek (klasyfikacja = 0). Model przyjmujemy za dobry jeśli wartości obu tych statystyk są wysokie.  
+
+Krzywa ROC jest ilustracją wzajemnej zależności pomiędzy czułością i specyficznością predyktora w funkcji progu klasyfikacji s ($\hat{y_i} = 1$ jeśli $\mu_i(\hat{\beta}) \geq s$).
+
+```{r, out.width="300px", fig.align="center", message=FALSE, warning=FALSE, echo=FALSE}
+library(pROC)
+roc(data$success~fitted(reg), plot = TRUE, print.auc = TRUE)
+```
+
+Nasz klasyfikator osiąga wartości bliskie górnemu lewemu rogowi (wysoka czułość, niskie 1-specyficzność). Model przyjmujemy za dobry.
+
+## Zadanie 5
+
+Zkonstruujemy teraz modele regresji dla różnych funkcji linkujących.
+
+### Probit
+Funkcja probit jest równa kwantylowi standardowaego rozkładu normalnego
+$$
+\text{probit}(\mu_i) = \Phi^{-1}(\mu_i).
+$$
+```{r}
+# probit 
+reg_prob = glm(success~numeracy + anxiety, data = data, family = binomial("probit"))
+reg_prob$coefficients
+```
+
+Model regresji probit to
+$$
+\Phi^{-1}(\mu_i) = 8.257 + 0.337*numeracy_i - 0.804*anxiety_i.
+$$
+
+```{r}
+# p values of significance tests
+summary(reg_prob)[['coefficients']][,"Pr(>|z|)"]
+```
+
+Dla poziomu istotności 0.05 wszystkie parametry są istotne.
+
+```{r}
+predict.glm(reg_prob, newdata = data.frame(numeracy=c(10), anxiety=c(13)), type = "response")
+```
+Prawdopodobieństwo, że taki student dostanie się na studia wynosi około 88%, podobnie jak w przypadku regresjii logistycznej. 
+
+### Cauchit
+
+Funkcja cauchit jest równa kwantylowi standardowaego rozkładu Cauchy'ego
+$$
+\text{cauchit}(\mu_i) = F^{-1}(\mu_i).
+$$
+```{r}
+#cauchit
+reg_cauch = glm(success~numeracy + anxiety, data = data, family = binomial("cauchit"))
+reg_cauch$coefficients
+```
+
+Model regresji cauchit to
+$$
+F^{-1}(\mu_i) = 18.383 + 0.732*numeracy_i - 1.774*anxiety_i.
+$$
+
+```{r}
+# p values of significance tests
+summary(reg_cauch)[['coefficients']][,"Pr(>|z|)"]
+```
+
+Dla poziomu istotności 0.05 żaden z parametrów nie jest istotny.
+
+```{r}
+predict.glm(reg_cauch, newdata = data.frame(numeracy=c(10), anxiety=c(13)), type = "response")
+```
+W tym przypadku prawdopodobieństwo również wynosi około 88%. 
+
+### Cloglog 
+
+Funkcja cloglog (complementary log-log function): 
+$$
+\text{cloglog}(\mu_i) = \text{log}(-\text{log}(1-\mu_i)).
+$$
+
+```{r}
+#cloglog
+reg_cll = glm(success~numeracy + anxiety, data = data, family = binomial("cloglog"))
+reg_cll$coefficients
+```
+
+Model regresji cloglog to
+$$
+F^{-1}(\mu_i) =9 + 0.402*numeracy -0.939*anxiety.
+$$
+
+```{r}
+# p values of significance tests
+summary(reg_cll)[['coefficients']][,"Pr(>|z|)"]
+```
+
+Dla poziomu istotności 0.05 istotne są parametry z wyjątkiem interceptu.
+
+```{r}
+predict.glm(reg_cll, newdata = data.frame(numeracy=c(10), anxiety=c(13)), type = "response")
+```
+Prawdopodobieństwo wynosi około 89%. 
+
+
+### Najlpesze dopasowanie
+
+Ponieważ wszystkie modele mają taką samą liczbę parametrów, do ich porównania mozemy wykorzystać statystykę Deviance. Wybieramy model z najmniejszą wartością tej statystyki.
+```{r}
+reg$deviance; reg_prob$deviance; reg_cauch$deviance; reg_cll$deviance
+```
+
+Najlepiej dopasowana zdaje się być funckja probit, następnie cauchit, logit i cloglog.
+
+### Krzywe ROC dla różnych modeli
+```{r, message=FALSE, warning=FALSE}
+rocobj1 = roc(data$success~fitted(reg))
+rocobj2 = roc(data$success~fitted(reg_prob))
+rocobj3 = roc(data$success~fitted(reg_cauch))
+rocobj4 = roc(data$success~fitted(reg_cll))
+```
+
+```{r, echo=FALSE}
+p1 = ggroc(rocobj1, legacy.axes = TRUE) + 
+  geom_abline(lty=3) + 
+  labs(title = "Logit")
+p2 = ggroc(rocobj2, legacy.axes = TRUE) + 
+  geom_abline(lty=3) + 
+  labs(title = "Probit")
+p3 = ggroc(rocobj3, legacy.axes = TRUE) + 
+  geom_abline(lty=3) + 
+  labs(title = "Cauchit")
+p4 = ggroc(rocobj3, legacy.axes = TRUE) + 
+  geom_abline(lty=3) + 
+  labs(title = "Cloglog")
+p5 = ggroc(list(logit = rocobj1, probit = rocobj2, cauchit = rocobj3, cloglog = rocobj4), legacy.axes = TRUE) +
+  labs(title = "ROC dla wszystkich modeli")
+```
+
+```{r,echo=FALSE, out.width="300px", fig.align="center"}
+plot(p5)
+```
+
+```{r, fig.height=5, warning=FALSE, message=FALSE, echo=FALSE}
+cowplot::plot_grid(p1, p2, p3, p4, cols=2)
+```
+
+
+Widzimy, że tylko krzywa ROC dla funkcji cloglog minimalnie różni się od pozostałych.
+
+## Zadanie 6
+
+R tym zadaniu skupimy się na modelu z funkcja linkującą logit.
+
+* Estymacja macierzy kowariancji  
+
+Macierz kowariancji wektora $\hat{\beta}$
+$$
+\text{Cov}(\hat{\beta}) = (X'S(\beta)X)^{-1}, \quad S = \text{diag}(\hat{\mu}(1-\hat{\mu})).
+$$
+
+```{r}
+prob = predict.glm(reg, data, type = "response")
+S = diag(prob*(1-prob)) # nrow(data) by nrow(data)
+X = as.matrix(cbind(1, data$numeracy, data$anxiety))
+covM = solve(t(X)%*%S%*%X)
+covM
+```
+
+```{r}
+vcov(reg)
+```
+
+```{r}
+summary(reg)[['coefficients']][,"Std. Error"]^2
+```
+
+Obliczony ręcznie estymator macierzy kowariancji jak i macierz kowariancji zwracana przez R sa bardzo podobne.
+
+
+* Test istostności obu zmiennych jednocześnie
+
+Testujemy
+$$
+H_0: \beta_1 = \beta_2 = 0 \quad H_1:\beta_1\neq 0 \text{ lub } \beta_2 \neq 0.
+$$
+Statystyka Deviance jest zdefiniowana
+$$
+D(M(\hat{\beta}^{(r)})) = 2[\text{logLik}(\hat{\beta}^{(s)}) - \text{logLik}(\hat{\beta}^{(r)})],
+$$
+gdzie przez $\text{logLik}(\hat{\beta}^{(s)})$ oznaczamy funkcję log-wiarogodności modelu saturowanego (liczba parametrów = liczba obserwacji), a przez $\text{logLik}(\hat{\beta}^{(r)})$ fukncję log-wiarogodności modelu zredukowanego (liczba parametrów < liczba obserwacji).
+
+Oznaczmy przez $M_1$ model odpowiadający hipotezie zerowej (pewne współczynniki są równe zeru) oraz przez $M_2$ model związany z alternatywą (brak warunków). Statystyka:
+$$
+\chi^2 = D(M_1) - D(M_2) 
+$$
+ma asyptotycznie rozkład $\chi^2$, z liczbą stopni swobody równą liczbie zerowanych parametrów. Hipotezę zerową odrzucamy dla dużych wartości statystyki testowej, dokładniej gdy $\chi^2 > F^{-1}(1-\alpha)$, gdzie $F^{-1}(1-\alpha)$ jest kwantylem rzędu $\alpha$ z rozkładu $\chi^2$ z liczbą stopni swobody jak wyżej.  
+
+Ponieważ interesuje nas model pełny i model tylko z interceptem, możemy skorzystać z wartości $\texttt{null deviance}$ (deviance dla modelu tylko z $\beta_0$) oraz $\texttt{residual deviance}$ (deviance dla modelu pełnego), zawartych w $\texttt{summary}$. Statystyka pochodzi z rozkładu $\chi^2$ z 2 stopniami swobody.
+
+```{r}
+T = reg$null.deviance - reg$deviance
+T
+1 - pchisq(T, df=2)
+```
+
+P-wartość jest bardzo bliska zeru zatem na poziomie istotności 0.05 odrzucamy hipotezę zerową i stwierdzamy, że przynajmniej jeden parametr regresji jest różny od zera.
+
+* Testowanie dopasowania modelu do danych  
+
+Chcemy teraz przetestować czy nasz model jest dobrze dopasowany do danych:
+$$
+H_0: \text{dane pochodzą z modelu }\quad H_1: \text{dane nie pochodzą z modelu}.
+$$
+Kiedy mamy do czynienia z danymi grupowanymi i kategorycznymi możemy w tym celu posłużyć się statystyka Deviance. Niestety dane, którymi dysponujemy są ciągłe, zatem wykorzystanie statystyki Deviance jest niemożliwe. Użyjemy testu Hosmera-Lemeshowa. Hipoteza zerowa tego testu
+mówi, że prawdopodobieństwa estymowane przez model odpowiadają prawdopodobieństwom rzeczywistym.
+```{r,  warning=FALSE}
+generalhoslem::logitgof(data$success, fitted(reg))
+```
+P-wartość jest większa niż 0.05. Zatem na tym poziomie istotności nie mamy podstaw, aby twierdzić że nasz model jest źle dopasowany.
+
+
+* Parametr epsilon  
+
+W przeciwieństwie do regresjii liniowej w regresji logistycznej nie jesteśmy w stanie znaleźć dokładnej wartości estymatora $\hat{\beta}$, przez co szukamy oszacowania. Funkcja $\texttt{glm}$ do znalezienia tego oszacowania używa iteracyjnej metody *iteratively reweighted least squares*.  Parametr $\epsilon$ w funkcji $\texttt{glm}$ kontroluje kiedy nasze oszacowanie jest wystarczająco dobre i możemy zatrzymać iteracje. Z dokumantacji $\texttt{glm}$ mamy, że algorytm zbiegł gdy:
+$$
+\frac{|dev - dev_{old}|}{|dev| + 0.1} < \epsilon.
+$$
+Domyślnie jest ustawiony na $10^{-8}$.
+
+
+```{r, echo=FALSE}
+reg_eps1 = glm(success~numeracy + anxiety, data = data, family = "binomial",
+               control =  glm.control(epsilon = 10^(-1)))
+
+reg_eps2 = glm(success~numeracy + anxiety, data = data, family = "binomial",
+               control =  glm.control(epsilon = 10^(-2)))
+
+reg_eps3 = glm(success~numeracy + anxiety, data = data, family = "binomial",
+               control =  glm.control(epsilon = 10^(-3)))
+
+reg_eps6 = glm(success~numeracy + anxiety, data = data, family = "binomial",
+               control =  glm.control(epsilon = 10^(-6)))
+
+
+res_all_eps = data.frame(c(reg_eps1$iter, reg_eps2$iter, reg_eps3$iter, reg_eps6$iter,reg$iter),
+                         c( reg_eps1$coefficients[1], reg_eps2$coefficients[1], 
+                           reg_eps3$coefficients[1], reg_eps6$coefficients[1], reg$coefficients[1]),
+                         c( reg_eps1$coefficients[2], reg_eps2$coefficients[2], 
+                           reg_eps3$coefficients[2], reg_eps6$coefficients[2], reg$coefficients[2]), 
+                         c(reg_eps1$coefficients[3], reg_eps2$coefficients[3], 
+                           reg_eps3$coefficients[3], reg_eps6$coefficients[3], reg$coefficients[3])) 
+
+colnames(res_all_eps) = c("iter", "$\\hat{\\beta_1}$", "$\\hat{\\beta_2}$","$\\hat{\\beta_3}$")
+```
+
+```{r, echo=FALSE}
+eps = c("$10^{-1}$", "$10^{-2}$", "$10^{-3}$", "$10^{-6}$", "$10^{-8}$")
+knitr::kable(cbind(eps, res_all_eps), escape = FALSE, format = "markdown", caption = "Porównanie dla różnych $\\epsilon$")
+```
+
+
+# Symulacje
+## Zadanie 1
+
+Mamy model
+$$
+\mu = X\beta, \quad X = \begin{pmatrix} X_{11} & X_{12} & X_{13} \\ X_{21} & X_{22} & X_{23} \\ \vdots & \vdots & \vdots \\ X_{n1} & X_{n2} & X_{n3} \end{pmatrix}, X_{ij} \sim N(0, 1/400), \beta = \begin{pmatrix} 3 \\3\\3 \end{pmatrix}.
+$$
+Wyznaczymy macierz informacji Fishera dla tego modelu w punkcie $\beta$ i asymptotyczną macierz kowariancji estymatorów najwiekszej wiarogodnosci.
+
+
+```{r}
+n = 400
+p=3
+X = matrix(rnorm(n*p, 0, 1/20), nrow = n, ncol = p)
+beta = c(3,3,3)
+prob = as.vector(exp(X%*%beta)/(1 + exp(X%*%beta)))
+S = diag(prob*(1-prob))
+# macierz informacji Fishera
+J = t(X)%*%S%*%X
+# macierz kowariancji
+covM = solve(J)
+
+```
+
+Macierz informacji Fishera to
+```{r}
+J
+```
+
+Macierz kowariancji to odwrotności $J$
+```{r}
+covM
+```
+
+Wygenerujemy teraz 1000 replikacji wektora odpowiedzi zgodnie z powyższym modelem i na podstawie każdej replikacji wyznaczymy estymator wektora $\beta$.  
+
+* Histogramy estymatorów i ich rozkład asymptotyczny dla $n=400$.
+```{r}
+experiment = function(X, prob) {
+  Y= rbinom(n, 1, prob = prob)
+  reg = glm(Y~X-1, family = 'binomial')
+  coefs = reg$coefficients
+  return(c(reg$coefficients[1], reg$coefficients[2], reg$coefficients[3]))
+}
+
+res = replicate(1000, experiment(X, prob))
+res = t(res)
+colnames(res) = c("beta1", "beta2", "beta3")
+```
+
+```{r, echo=FALSE}
+p1 = ggplot(data = data.frame(res), aes(x = beta1)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM[1,1]))) +
+  labs(title =  expression(paste("Estymator ", beta[1])))
+  
+p2 = ggplot(data = data.frame(res), aes(x = beta2)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM[2,2]))) +
+  labs(title =  expression(paste("Estymator ", beta[2])))
+
+p3 = ggplot(data = data.frame(res), aes(x = beta3)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM[3,3]))) +
+  labs(title =  expression(paste("Estymator ", beta[3])))
+```
+
+
+```{r, fig.height=5, warning=FALSE, message=FALSE, echo=FALSE}
+cowplot::plot_grid(p1, p2, p3)
+```
+
+Widzimy, że histogramy są bliskie rozkładom asymptotycznym w przypadku gdy $n=400$.   
+
+* Obciążenie estymatorów  
+
+Obciążonie estymatora $\hat{\beta_i}$ parametru $\beta_i$ to
+$$
+\text{bias}(\hat{\beta_i}) = \mathbb{E}(\hat{\beta_i}) - \beta_i.
+$$
+
+```{r}
+get_bias = function(estimate, truth) {
+  mean(estimate) - truth
+}
+biases = apply(res, 2, get_bias, truth=3)
+biases
+```
+
+
+* Estymacja macierzy kowariancji wektora estymatorów  
+
+Próbkowa macierz kowariancji:
+
+```{r}
+cov(res)
+```
+
+Asymptotyczna macierz kowariancji:
+
+```{r}
+covM
+```
+
+Estymowana macierz kowariancji, jak i asymptotyczna macierz kowariancji są do siebie zbliżone.
+
+
+## Zadanie 2
+
+Powtórzymy teraz doświadczenie z zadania 1 dla $n=100$
+
+
+```{r, echo=FALSE}
+# 2
+n=100
+X2 = matrix(rnorm(n*p, 0, 1/20), nrow = n, ncol = p)
+prob2 = as.vector(exp(X2%*%beta)/(1 + exp(X2%*%beta)))
+S2 = diag(prob2*(1-prob2))
+J2 = t(X2)%*%S2%*%X2
+covM2 = solve(J2)
+res2 = replicate(1000, experiment(X2, prob2))
+res2 = t(res2)
+colnames(res2) = c("beta1", "beta2", "beta3")
+```
+
+
+
+```{r, echo=FALSE}
+p1 = ggplot(data = data.frame(res2), aes(x = beta1)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM2[1,1]))) +
+  labs(title =  expression(paste("Estymator ", beta[1])))
+  
+p2 = ggplot(data = data.frame(res2), aes(x = beta2)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM2[2,2]))) +
+  labs(title =  expression(paste("Estymator ", beta[2])))
+
+p3 = ggplot(data = data.frame(res2), aes(x = beta3)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM2[3,3]))) +
+  labs(title =  expression(paste("Estymator ", beta[3])))
+```
+
+
+```{r, fig.height=5, warning=FALSE, message=FALSE, echo=FALSE}
+cowplot::plot_grid(p1, p2, p3)
+```
+
+Zauważmy że w porównaniu do poprzedniego zadania, gdy $n=400$, dane są dużo bardziej rozrzucone. Estymatory przyjmują wartości od około -10 do 20, gdzie w poprzednim zadaniu wahania były w obrębie od -5 do 10.  
+
+
+```{r}
+biases2 = apply(res2, 2, get_bias, truth=3)
+biases2
+```
+\newpage
+
+```{r}
+cov(res2)
+```
+
+```{r}
+covM2
+```
+
+Elementy obu macierzy są porównywalne, lecz różnice pomiędzy nimi są większe niż w poprzednim punkcie. Słabsza zbieżność do rozkładu asymptotycznego, w przypadku małej ilości obserwacji.
+
+
+## Zadanie 3
+
+Sprawdzimy teraz jak na estymatory oddziaływuje korelacja pomiędzy predyktorami. Wiersze macierzy planu generujemy z rozkładu normalnego $N(0, \Sigma)$, gdzie
+$$
+\Sigma = \frac{1}{n}S,\ S_{ii} =1,\ S_{i,j} = 0.3 \text{ dla } i \neq j.
+$$
+
+```{r}
+library(mvtnorm)
+n=400
+covX3 = matrix(0.3, nrow = 3, ncol = 3)
+diag(covX3) = 1
+covX3 = (1/n)*covX3
+X3 = rmvnorm(n, mean = rep(0, 3), sigma = covX3)
+```
+Teoretyczna macierz kowariancji
+```{r}
+covX3
+```
+
+Zobaczmy, czy rzeczywiście otrzymaliśmy macierz zgodna z założeniami
+```{r}
+cov(X3)
+```
+
+```{r}
+cov2cor(cov(X3))
+```
+
+Predyktory są skorelowane.
+
+```{r, echo=FALSE}
+prob3 = as.vector(exp(X3%*%beta)/(1 + exp(X3%*%beta)))
+S3 = diag(prob3*(1-prob3))
+J3 = t(X3)%*%S3%*%X3
+covM3 = solve(J3)
+res3 = replicate(1000, experiment(X3, prob3))
+res3 = t(res3)
+colnames(res3) = c("beta1", "beta2", "beta3")
+```
+
+
+```{r, echo=FALSE}
+p1 = ggplot(data = data.frame(res3), aes(x = beta1)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM3[1,1]))) +
+  labs(title =  expression(paste("Estymator ", beta[1])))
+  
+p2 = ggplot(data = data.frame(res3), aes(x = beta2)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM3[2,2]))) +
+  labs(title =  expression(paste("Estymator ", beta[2])))
+
+p3 = ggplot(data = data.frame(res3), aes(x = beta3)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM3[3,3]))) +
+  labs(title =  expression(paste("Estymator ", beta[3])))
+```
+
+  
+```{r, fig.height=5, warning=FALSE, message=FALSE, echo=FALSE}
+cowplot::plot_grid(p1, p2, p3)
+```
+
+```{r}
+biases3 = apply(res3, 2, get_bias, truth=3)
+biases3
+```
+
+```{r}
+cov(res3)
+```
+
+```{r}
+covM3
+```
+
+
+### Większa korelacja
+
+Poglądowo zobaczmy co się dzieje, jeśli predyktory są bardzo mocno skorelowane (na poziomie 0.9).
+```{r, echo=FALSE}
+covX3_2 = matrix(0.9, nrow = 3, ncol = 3)
+diag(covX3_2) = 1
+covX3_2 = (1/n)*covX3_2
+X3_2 = rmvnorm(n, mean = rep(0, 3), sigma = covX3_2)
+```
+
+```{r}
+cov2cor(cov(X3_2))
+```
+
+
+```{r, echo=FALSE}
+prob3_2 = as.vector(exp(X3_2%*%beta)/(1 + exp(X3_2%*%beta)))
+S3_2 = diag(prob3_2*(1-prob3_2))
+J3_2 = t(X3_2)%*%S3_2%*%X3_2
+covM3_2 = solve(J3_2)
+res3_2 = replicate(1000, experiment(X3_2, prob3_2))
+res3_2 = t(res3_2)
+colnames(res3_2) = c("beta1", "beta2", "beta3")
+```
+
+
+```{r, echo=FALSE}
+p1 = ggplot(data = data.frame(res3_2), aes(x = beta1)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM3_2[1,1]))) +
+  labs(title =  expression(paste("Estymator ", beta[1])))
+  
+p2 = ggplot(data = data.frame(res3_2), aes(x = beta2)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM3_2[2,2]))) +
+  labs(title =  expression(paste("Estymator ", beta[2])))
+
+p3 = ggplot(data = data.frame(res3_2), aes(x = beta3)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM3_2[3,3]))) +
+  labs(title =  expression(paste("Estymator ", beta[3])))
+```
+
+  
+```{r, fig.height=5, warning=FALSE, message=FALSE, echo=FALSE}
+cowplot::plot_grid(p1, p2, p3)
+```
+
+Rozrzut danych jest duży od ok -20 do 20, w wielu przypadkach estymatory są wyznaczane bardzo niedokładnie.
+
+```{r}
+biases3_2 = apply(res3_2, 2, get_bias, truth=3)
+biases3_2
+```
+
+```{r}
+cov(res3_2)
+```
+
+```{r}
+covM3_2
+```
+
+Duża wariancja, dane mocno różnią się od średniej. 
+
+## Zadanie 4
+
+Powtórzymy zadanie 1 w przypadku gdy liczba regresorów jest równa 20 ($p=20$).
+
+```{r, echo=FALSE}
+n = 400
+p=20
+X4 = matrix(rnorm(n*p, 0, 1/20), nrow = n, ncol = p)
+beta4 = c(3,3,3, rep(3, p-3))
+prob4 = as.vector(exp(X4%*%beta4)/(1 + exp(X4%*%beta4)))
+# macierz informacji Fishera
+S4 = diag(prob4*(1-prob4))
+J4 = t(X4)%*%S4%*%X4
+# macierz kowariancji
+covM4 = solve(J4)
+res4 = replicate(1000, experiment(X4, prob4))
+res4 = t(res4)
+colnames(res4) = c("beta1", "beta2", "beta3")
+```
+
+```{r, echo=FALSE}
+p1 = ggplot(data = data.frame(res4), aes(x = beta1)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM4[1,1]))) +
+  labs(title =  expression(paste("Estymator ", beta[1])))
+  
+p2 = ggplot(data = data.frame(res4), aes(x = beta2)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM4[2,2]))) +
+  labs(title =  expression(paste("Estymator ", beta[2])))
+
+p3 = ggplot(data = data.frame(res4), aes(x = beta3)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(covM4[3,3]))) +
+  labs(title =  expression(paste("Estymator ", beta[3])))
+```
+
+  
+```{r, fig.height=5, warning=FALSE, message=FALSE, echo=FALSE}
+cowplot::plot_grid(p1, p2, p3)
+```
+
+```{r}
+biases4 = apply(res4, 2, get_bias, truth=3)
+biases4
+```
+
+Średnie obciążenie jest więsze, niż w poprzednich punktach.
+
+```{r}
+cov(res4)
+```
+
+```{r}
+covM4[1:3, 1:3]
+```
+
+\newpage
+
+## Zadanie 5
+```{r, echo=FALSE}
+b = rbind(biases, biases2, biases3, biases4)
+m1 = apply(res, 2, mean)
+m2 = apply(res2, 2, mean)
+m3 = apply(res3, 2, mean)
+m4 = apply(res4, 2, mean)
+m = rbind(m1,m2,m3,m4)
+v1 = apply(res, 2, var)
+v2 = apply(res2, 2, var)
+v3 = apply(res3, 2, var)
+v4 = apply(res4, 2, var)
+v = rbind(v1,v2,v3,v4)
+res_all_comp = cbind(m, b)
+rownames(res_all_comp) = c("M1", "M2", "M3", "M4")
+colnames(res_all_comp) = c( "mean($\\hat{\\beta_1}$)", "mean($\\hat{\\beta_2}$)", "mean($\\hat{\\beta_3}$)",
+                            "bias($\\hat{\\beta_1}$)", "bias($\\hat{\\beta_2}$)", "bias($\\hat{\\beta_3}$)")
+res_all_var = v
+rownames(res_all_var) = c("M1", "M2", "M3", "M4")
+colnames(res_all_var) = c("var($\\hat{\\beta_1}$)", "var($\\hat{\\beta_2}$)", "var($\\hat{\\beta_3}$)")
+```
+
+```{r, echo=FALSE}
+knitr::kable(res_all_comp, format = "markdown", caption = "Porównanie modeli, średnia i obciążenie.", escape = FALSE)
+```
+
+
+```{r, echo=FALSE}
+knitr::kable(res_all_var, format = "markdown", caption = "Porównanie modeli, wariancja.", escape = FALSE)
+```
+
+
+Największą wariancję ma model z zadania 2, co wydaje sie naturalne, jako że już wcześniej zaobserwowaliśmy rozrzut danych większy niż w pozostałych przypadkach. Pozostałe modele dają podobne wyniki. Najlepiej dane estymuje model z zadania 1, wariancje estymatorów są najmniejsze, podobnie obciążenia. Dla modelu z korelacją między predyktorami (M3) wariancja jest większa od tej w modelu 1. Większa ilość predyktorów wpływa na zwiększenie obciążenia estymatora jak i wariancji.
+
+
+
+

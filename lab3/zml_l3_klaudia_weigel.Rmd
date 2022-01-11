@@ -1,0 +1,461 @@
+---
+title: "Zaawansowane modele liniowe - Lista 3"
+author: "Klaudia Weigel"
+geometry: "left=2cm,right=2cm,top=2cm,bottom=2cm"
+output: 
+  pdf_document: 
+    fig_caption: yes
+    highlight: tango
+    number_sections: yes
+
+header_includes:
+  - \usepackage{amsmath}
+  - \usepackage{amssymb}
+  - \usepackage{amsthm}
+  - \usepackage{listings}
+  - \theoremstyle{definition}
+  - \usepackage{bbm}
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+options(knitr.kable.NA = '-')
+library(ggplot2)
+library(MASS)
+library(pscl)
+library(reshape)
+library(kableExtra)
+```
+
+# Zadanie 1
+
+Wygenerujemy losową macierz $X \in \mathbb{R}_{1000\times 2}$, taką że $X_{ij}\sim^{iid} N(0, \sigma = 1/\sqrt{1000})$, oraz ciąg predyktorów liniowych $\eta = X\beta$, gdzie $\beta = (3,3)'$. Na ich podstawie wygenerujemy 10000 niezależnych replikacji wektora odpowiedzi $y$ z rozkładu Poissona. Dla każdej replikacji wektora odpowiedzi $y$ dopasujemy model regresji ujemnej dwumianowej i regresji Poissona  i wyznaczymy na ich podstawie ciąg $\hat{\alpha}$ oraz statystyk z problemu testowania:
+
+$$
+H_0: \text{dane pochodzą z rozkładu Poissona}
+$$
+$$
+przeciwko
+$$
+$$
+H_1: \text{dane pochodzą z rozkładu ujemnego dwumianowego.}
+$$
+
+Statystyka testowa ma postać
+$$
+\chi^2 = D(M_1) - D(M_2)
+$$
+
+Przy $H_0$ statystyka ma asymptotycznie rozkład będący mieszanką, rozkładu skoncentrowanego w 0 oraz rozkładu $\chi^2$ z jednym stopniem swobody. 
+$$
+\chi^2 \sim 0.5F_0 + 0.5F_{\chi^2(df=1)}.
+$$
+Na poziomie istotności $q$ hipotezę zerową odrzucamy dla wartości statystyki $\chi^2$ większych od kwantyla rzędu $1-2q$ z rozkładu $\chi^2$ z 1 stopniem swobody.
+
+```{r}
+x = matrix(rnorm(2000, mean = 0, sd = 1/sqrt(1000)), nrow = 1000, ncol = 2)
+
+lambda_i = exp(x%*%c(3,3)); reps = 10000
+Y = replicate(reps, rpois(1000, lambda = lambda_i))
+
+ex_1 = function(y) {
+  mod1 = glm(y~x-1, family = poisson())
+  mod2 = glm.nb(y~x-1)
+  alpha = 1/mod2$theta
+  chi2 = 2*(logLik(mod2) - logLik(mod1))
+  
+  return(list(alpha = alpha, chi2 = chi2))
+}
+
+mydist = function(x) { 0.5*dchisq(x, df=1) }
+
+res = apply(Y, 2, function(y) ex_1(y))
+alpha = sapply(1:reps, function(i) res[[i]]$alpha)
+chi2 = sapply(1:reps, function(i) res[[i]]$chi2)
+```
+
+\newpage
+
+## Estymator $\hat{\alpha}$
+
+Poniżej przedstawiony jest histogram oraz wykres kwantylowo-kwantylowy dla $\hat{\alpha}$. Histogram porównujemy z rozkładem normalnym ze średnią 0 oraz odchyleniem standardowym, które można przybliżyć przez:
+$$
+\hat{\sigma} \approx \frac{F^{-1}(0.75)}{\Phi^{-1}(0.75)}\ ,
+$$
+gdzie $F^{-1}(0.75)$ jest kwantylem próbkowym rzędu 0.75.  
+
+```{r, echo=FALSE}
+p1 = ggplot(data = data.frame(alpha), aes(x = alpha)) +
+  geom_histogram(alpha=0.4, color="slateblue", fill='slateblue', bins = 20)
+
+p2 = ggplot(data = data.frame(alpha), aes(x = alpha)) +
+  geom_histogram(aes(y =..density..), alpha=0.4, color="slateblue", fill='slateblue', bins = 15) +
+  stat_function(fun = dnorm, args=list(mean = 0, sd = quantile(alpha, probs = 0.75)/qnorm(0.75))) +
+  coord_cartesian(ylim = c(0, 15)) 
+
+p3 = ggplot(data.frame(alpha), aes(sample = alpha)) +
+  stat_qq(alpha = 0.3) + 
+  stat_qq_line(distribution = qnorm, dparams=list(mean = 0, sd = 1), line.p = c(0.6, 0.95), color = "slateblue1") +
+  coord_cartesian(ylim = c(0, 0.2)) 
+```
+
+
+```{r, fig.height=2.5, warning=FALSE, message=FALSE, echo=FALSE}
+cowplot::plot_grid(p1, p2, p3, ncol = 3)
+```
+
+Bardzo dużo wartości estymatora jest bliskich zeru. Dla wartości na prawo od zera rozkład estymatora jest bliski rozkładowi normalnemu, co potwierdza także wykres kwantylowo-kwantylowy. Wyniki są zgodne z teorią przedstawioną na wykładzie.
+
+
+## $\chi^2$
+
+Poniżej mamy histogram dla replikacji statystyki $\chi^2$ wraz z przeskalowaną gęstością ($0.5*F_{\chi^2(df=1)}$).
+
+```{r, echo=FALSE}
+p1 = ggplot(data = data.frame(chi2), aes(x = chi2)) +
+  geom_histogram(alpha=0.4, color="slateblue", fill='slateblue', bins = 20)
+
+p2 = ggplot(data = data.frame(chi2), aes(x = chi2)) +
+  geom_histogram(aes(y =..density..), alpha=0.4, color="slateblue", fill='slateblue', bins = 20) +
+  stat_function(fun = mydist) +
+  coord_cartesian(ylim = c(0, 0.2)) 
+```
+
+
+```{r, fig.height=2.5, warning=FALSE, message=FALSE, echo=FALSE}
+cowplot::plot_grid(p1, p2)
+```
+
+
+Wyznaczmy teraz funkcję kwantylową dla $F = 0.5F_0 + 0.5F_{\chi^2(df=1)}$. Dla $q < 0.5$, $F^{-1} = 0$, jako że oba składniki mieszanki przyjmują wartości nieujemne, a połowa masy znajduje się w zerze. Jeśli chcemy znaleźć kwantyl rzędu $q = 0.5 + q_0$, wystarczy znaleźć kwantyl rzędu $q_0 = q-0.5$ z rozkładu $0.5F_{\chi^2(df=1)}$.
+$$
+0.5F_{\chi^2(df=1)}(x) =  q-0.5 \iff F_{\chi^2(df=1)}(x) = \frac{q-0.5}{0.5} \iff x = F_{\chi^2(df=1)}^{-1}\left(\frac{q-0.5}{0.5}\right) .
+$$
+
+Czyli musimy wyznaczyć kwantyl rzędu $\frac{q-0.5}{0.5}$ z rozkładu $F_{\chi^2(df=1)}$.  
+
+
+```{r, out.width="300px", fig.align='center'}
+myquantile = function(q) {
+  q = sapply(q, function(qi) max(0, (qi-0.5)/0.5))
+  qchisq(q, df=1)
+}
+qqplot(myquantile(ppoints(reps)), chi2, main = "QQPlot", xlab = "Theoretical", ylab = "Sample")
+qqline(chi2, distribution = myquantile, probs = c(0.5, 0.9), col = 'slateblue1')
+
+```
+
+
+
+# Zadanie 2
+
+Chcemy zbadać związek pomiędzy liczbą wizyt w gabinecie lekarskim (zmienna zależna, kolumna "ofp") i zmiennymi niezależnymi opisującymi pacjenta:  
+
+* "hosp" – liczba pobytów w szpitalu,  
+* "health" – zmienna opisująca subiektywny odczucie pacjenta o jego zdrowiu,  
+* "numchron" – liczba przewlekłych stanów chorobowych,  
+* "gender" – płeć,  
+* "school" – liczba lat edukacji,  
+* "privins" – indykator opisujący to czy pacjent ma dodatkowe prywatne ubezpieczenie zdrowotne.
+
+```{r}
+debtrivedi =  read.csv("DebTrivedi.csv")[ ,c('ofp', 'hosp', 'health', 'numchron',
+                                             'gender', 'school', 'privins')]
+head(debtrivedi)
+```
+
+\newpage
+
+# Zadanie 3
+Wykonamy wstępną analizę danych z zadania 2.
+
+```{r, fig.align='center', out.width="250px", fig.cap="Histogram zmiennej \textit{ofp}.", echo=FALSE}
+ggplot(data = debtrivedi, aes(x = ofp)) +
+  geom_histogram(alpha=0.4, color="slateblue", fill='slateblue', bins = 15)
+```
+
+Widzimy, że bardzo dużo wartości jest równych zero, mamy więc do czynienia z inflacją w zerze.
+
+```{r}
+sum(debtrivedi$ofp ==0)
+```
+
+```{r}
+mean(debtrivedi$ofp); var(debtrivedi$ofp)
+```
+Wariancja zmiennej objaśnianej jest dużo wyższa niż średnia, mamy do czynienia ze zjawiskiem nadmiernej dyspersji.  
+
+
+Ze względu na dużą ilość zerowych wartości zmiennej $ofp$, wprowadzimy teraz nową zmienną $f(ofp)$, taką że 
+$$
+f(ofp) = \text{log}(ofp + 0.5)
+$$
+
+Na potrzeby wykonania wykresów, pogrupujemy wartości danego regresora tam gdzie jest mało obserwacji: dla zmiennych $hosp$ oraz $numchron$.
+
+```{r}
+table(debtrivedi$hosp)
+```
+
+```{r}
+table(debtrivedi$numchron)
+```
+
+Możemy pogrupować liczbę pobytów w szpitalu na "1", "2", "3 i więcej", natomiast ilość chorób przewlekłych na "1", "2", "3", "4", "5 i więcej".
+
+
+```{r, echo=FALSE}
+debtriv = debtrivedi
+debtriv$ofp2 = log(debtriv$ofp + 0.5)
+debtriv$hosp = sapply(debtriv$hosp, function(h) { if(h < 3) h else "3+" })
+debtriv$numchron = sapply(debtriv$numchron, function(h) { if(h < 5) h else "5+" })
+debtriv[,2:7] = lapply(debtriv[,2:7], factor)
+debtriv$health = factor(debtriv$health, levels=c("poor", "average",  "excellent"))
+debtrivedi_plot = melt(debtriv[,2:8], id.vars = c("ofp2"))
+```
+
+```{r, echo=FALSE, fig.height=8}
+ggplot(data = debtrivedi_plot, aes(x=as.factor(value), y = ofp2, fill = variable)) +
+  geom_boxplot(alpha = 0.8) +
+  facet_wrap(~variable, scales="free_x", nrow = 3, ncol = 2) +
+  theme(legend.position="none") + 
+  labs(x = "", y = "f(ofp)")
+```
+
+Ilość wizyt w gabinecie lekarskim rośnie ze względu na ilość pobytów szpitalu ($hosp$) oraz maleje wraz z poprawą subiektywnego odczucia pacjenta o jego zdrowiu ($health$). Obserwujemy także wzrost w ilości wizyt w zależności od ilości chorób przewlekłych ($numchrom$). W grupie mężczyzn więcej obserwacji leży poniżej mediany, niż w grupie kobiet, można więc przypuszczać, że kobiety częściej odwiedzają gabinet lekarski. Dla edukacji dłuższej niż 11 lat, rozkład danych staje się bardziej symetryczny i mniej elementów jest poniżej mediany. Możemy oczekiwać, że dłuższa edukacja będzie zwiększać wartość średniej liczby wizyt. Osoby posiadające prywatne ubezpieczenie medyczne częściej odwiedzają gabinet lekarski, niż osoby nie mający takiego ubezpieczenia.
+
+
+# Zadanie 4
+
+## Regresja Poissona
+Regresja Poissona zakłada, że zmienne objaśniane $y_i$ są realizacjami niezależnych zmiennych losowych z rozkładu Poissona ze średnią $\lambda_i$. Dla każdego $i$ związek między parametrem $\lambda_i$ a $(x_{i,1}, \dots, x_{i, p-1})'$ ma postać:
+
+$$
+\text{log}(\lambda_i) = \beta_0 + x_{i,1}\beta_1 + \dots + x_{i,p-1}\beta_{p-1},
+$$
+gdzie $\beta \in \mathbb{R}^p$ to nieznany wektor parametrów.  
+
+Pierwotne modele w tym i następnych punktach będziemy tworzyć w oparciu o wszystkie zmienne: 3 kategoryczne ($health$, $gender$ i $privins$) oraz 3 ciągłe ($hosp$, $numchron$ i $school$).
+
+```{r}
+mod_pois = glm(ofp~ . , data = debtrivedi, family = poisson())
+summary(mod_pois)
+```
+
+Wszystkie zmienne są mocno istotne.  
+
+Sprawdźmy ile wartości zerowych zmiennej objaśnianej $ofp$ przewiduje ten model:
+```{r}
+mu = predict(mod_pois, type = "response")
+sum(dpois(0, mu))
+```
+
+Przewidywana ilość jest znacznie mniejsza niż prawdziwa ilość zer. 
+
+## Regresja ujemna dwumianowa
+Zmienna losowa Y ma rozkład ujemny dwumianowy $NB(\mu, \alpha)$ z parametrami $\mu > 0$ i $\alpha > 0$, gdy przyjmuje wartości ze zbioru $\{0,1,2\dots\}$ z prawdopodobieństwem:
+$$
+P(Y=y) = \frac{\Gamma(y+\alpha^{-1})}{\Gamma(y+1)\Gamma(\alpha^{-1})}\left( \frac{\alpha^{-1}}{\alpha^{-1} + \mu} \right)^{\alpha^{-1}} \left(\frac{\mu}{\alpha^{-1}+\mu} \right)^y.
+$$
+
+Regresja ujemna dwumianowa zakłada, że zmienne objaśniane $y_i$ są realizacjami niezależnych zmiennych losowych z rozkładu ujemnego dwumianowego $NB(\mu_i, \alpha)$. Dla każdego $i$ związek między parametrem $\mu_i$, a $(x_{i,1}, \dots, x_{i, p-1})'$ ma postać:
+$$
+\text{log}(\mu_i) = \beta_0 + x_{i,1}\beta_1 + \dots + x_{i,p-1}\beta_{p-1},
+$$
+gdzie $\beta \in \mathbb{R}^p$ to nieznany wektor parametrów.
+
+```{r}
+mod_nb = glm.nb(ofp~., data = debtrivedi)
+summary(mod_nb)
+```
+
+Jak poprzednio wszystkie zmienne są istotne.
+
+## Regresja Poissona z inflacją w zerze (ZIPR)
+W modelu regresji Poissona z inflacją w zerze zakładamy że zmienne objaśniane $y_1,\dots,y_n$ są realizacjami niezależnych zmiennych losowych  $Y_1,\dots, Y_n$ które pochodzą z mieszanki rozkładu dwupunktowego i Poissona:
+$$
+P(Y_i = k ) = \begin{cases} \pi_i + (1-\pi_i)e^{\mu_i} & k= 0 \\ (1-\pi_i)\frac{\mu_i^k}{k!}e^{-\mu_i} & k=1,2,\dots \end{cases}
+$$
+gdzie $\pi_i \in [0,1]$ oraz $\mu_i > 0$.  
+Związek między parametrami $\mu_i$  oraz $\pi_i$, a $(x_{i,1}, \dots, x_{i, p-1})'$ oraz $(z_{i,1}, \dots, z_{i, m-1})'$ ma postać:
+$$
+\begin{aligned}
+&\text{log}(\mu_i) = \beta_0 + x_{i,1}\beta_1 + \dots + x_{i,p-1}\beta_{p-1}, \\
+&\text{logit}(\pi_i) = \gamma_0 + z_{i,1}\gamma_1 + \dots + z_{i,m-1}\gamma_{m-1},
+\end{aligned}
+$$
+gdzie $\beta \in \mathbb{R}^p$ i $\gamma \in \mathbb{R}^m$ to nieznane wektory parametrów.
+
+```{r}
+mod_zipr = zeroinfl(ofp~., data = debtrivedi)
+summary(mod_zipr)
+```
+
+Obserwujemy, że w modelu inflacji w zerze (zero-inflation model) nieistotna jest zmienna $health$. Porównajmy zatem model oryginalny do modelu bez tej zmiennej. Użyjemy testu opartego na statystyce deviance:
+$$
+\chi^2 = D(M_0) - D(M_A) = 2(\text{logLik}(M_A) - \text{logLik}(M_0)),
+$$
+gdzie $M_0$ odpowiada uproszczonemu modelowi regresji (hipoteza zerowa), natomiast $M_A$ odpowiada modelowi dla hipotezy alternatywnej. Hipotezę zerową odrzucamy gdy statystyka jest większa od kwantyla z rozkładu chi-kwadrat z ilością stopni swobody równą liczbie wyzerowanych parametrów w $M_0$.
+
+
+```{r}
+mod_zipr2 = zeroinfl(ofp~.|hosp + numchron + gender + school + privins, data = debtrivedi)
+#Test ilorazu wiarogodności
+chi_sq = 2*(logLik(mod_zipr) - logLik(mod_zipr2))   # statystka
+pchisq(as.numeric(chi_sq), df = 2, lower.tail = F)   #p-wartość
+```
+
+Na poziomie istotności 0.05 przyjmujemy hipotezę zerową.  
+
+Czyli ostatecznie nasz model to
+$$
+\begin{aligned}
+log(\mu_i) &= \beta_0 + \beta_1*hosp_i + \beta_2*\mathbb{I}\{health_i = \text{excellent}\} + \beta_3*\mathbb{I}\{health_i = \text{poor}\} \\
+&+ \beta_4*numchron_i + \beta_5 * \mathbb{I}\{gender_i = \text{male}\} + \beta_6*school_i + \beta_7*\mathbb{I}\{privins_i = \text{yes}\}
+\end{aligned}
+$$
+
+$$
+logit(\pi_i) = \gamma_0 + \gamma_1*hosp_i + \gamma_2*numchron_i + \gamma_3 * \mathbb{I}\{gender_i = \text{male}\} + \gamma_4*school_i + \gamma_5*\mathbb{I}\{privins_i = \text{yes}\}
+$$
+
+## Regresja ujemna dwumianowa z inflacją w zerze (ZINBR)
+W modelu regresji ujemnej dwumianowej  z inflacją w zerze zakładamy że zmienne objaśniane $y_1,\dots,y_n$ są realizacjami niezależnych zmiennych losowych  $Y_1,\dots, Y_n$ które pochodzą z mieszanki rozkładu dwupunktowego i ujemnego dwumianowego:
+$$
+P(Y_i = k ) = \begin{cases} \pi_i + (1-\pi_i)f(0;\mu_i, \phi) & k= 0 \\ (1-\pi_i)f(k;\mu_i, \phi) & k=1,2,\dots \end{cases}
+$$
+gdzie $\pi_i \in [0,1]$ oraz $\mu_i > 0$, a $f$ jest funkcją rozkładu prawdopodobieństwa $NB(\mu_i, \phi)$.  
+
+Związek między parametrami $\mu_i$  oraz $\pi_i$ a $(x_{i,1}, \dots, x_{i, p-1})'$ oraz $(z_{i,1}, \dots, z_{i, m-1})'$ ma postać:
+$$
+\begin{aligned}
+&\text{log}(\mu_i) = \beta_0 + x_{i,1}\beta_1 + \dots + x_{i,p-1}\beta_{p-1}, \\
+&\text{logit}(\pi_i) = \gamma_0 + z_{i,1}\gamma_1 + \dots + z_{i,m-1}\gamma_{m-1},
+\end{aligned}
+$$
+gdzie $\beta \in \mathbb{R}^p$ i $\gamma \in \mathbb{R}^m$ to nieznane wektory parametrów.
+
+```{r}
+mod_zinbr = zeroinfl(ofp~., data = debtrivedi, dist = "negbin")
+```
+
+Korzystając z wyników $\texttt{summary}$ otrzymujemy, że zmienna $health$ jest nieistotna w modelu dla inflacji w zerze.
+```{r}
+mod_zinbr2 = zeroinfl(ofp~.|hosp + numchron + gender + school + privins, data = debtrivedi, 
+                      dist = "negbin")
+chi_sq = 2*(logLik(mod_zipr) - logLik(mod_zipr2)) 
+pchisq(as.numeric(chi_sq), df = 2, lower.tail = F)
+```
+
+Na poziomie istotności 0.05 przyjmujemy hipotezę zerową. Ostateczny model ma taką sama postać jak w poprzednim punkcie.
+
+## Model regresji z barierą
+
+W modelu z barierą zakładamy, że zmienne objaśniane $y_i$ są realizacjami niezależnych zmiennych losowych z mieszanki dwóch rozkładów
+$$
+P(Y_i = k) = \begin{cases} f_{zero}(0) & k= 0 \\ (1-f_{zero}(0))\frac{f_{count}(k)}{1- f_{count}(k)} & k=1,2,\dots \end{cases}
+$$
+gdzie $f_{zero}(0)$ opisuje rozkład wartości 0, a $f_{count}(k)$ rozkład zmiennej zliczającej.  
+
+Dla każdego $i$ związek między parametrami $\mu_i^{count}$ oraz $\mu_i^{zero}$ a regresorami ma postać:
+$$
+\begin{aligned}
+&g_1(\mu_i^{count}) = \beta_0 + x_{i,1}\beta_1 + \dots + x_{i,p-1}\beta_{p-1}, \\
+&g_2(\mu_i^{zero}) = \gamma_0 + z_{i,1}\gamma_1 + \dots + z_{i,m-1}\gamma_{m-1},
+\end{aligned}
+$$
+gdzie $\beta \in \mathbb{R}^p$ i $\gamma \in \mathbb{R}^m$ to nieznane wektory parametrów.
+
+### Regresja Poissona z barierą  
+
+W tym przypadku $f_{count}$ to rozkład Poissona.
+
+```{r}
+mod_hurdlep = hurdle(ofp~., data = debtrivedi)
+summary(mod_hurdlep)
+```
+
+Usuwamy zmienną $health$ z modelu dla inflacji w zerze.
+
+```{r}
+mod_hurdlep2 = hurdle(ofp~.|hosp + numchron + gender + school + privins, data = debtrivedi)
+chi_sq = 2*(logLik(mod_hurdlep) - logLik(mod_hurdlep2)) 
+pchisq(as.numeric(chi_sq), df = 2, lower.tail = F) 
+```
+
+Na poziomie istotności 0.05 nie mamy podstaw do odrzucenia hipotezy zerowej. Przyjmujemy model bez $health$.
+
+### Regresja ujemna dwumianowa z barierą  
+
+Rozkład $f_{count}$ to rozkład ujemny dwumianowy.
+
+```{r}
+mod_hurdlenb = hurdle(ofp~., data = debtrivedi, dist = "negbin")
+```
+
+Wyniki $\texttt{summary}$ sugerują, że ponownie możemy usunąć zmienną $health$ z modelu inflacji w zerze.
+
+```{r}
+mod_hurdlenb2 = hurdle(ofp~.|hosp + numchron + gender + school + privins, data = debtrivedi, 
+                       dist = "negbin")
+chi_sq = 2*(logLik(mod_hurdlenb) - logLik(mod_hurdlenb2)) 
+pchisq(as.numeric(chi_sq), df = 2, lower.tail = F) 
+```
+
+Na poziomie istotności 0.05 przyjmujemy hipotezę zerową, zakładającą model inflacji bez zmiennej $health$.
+
+## Porównanie wyników
+
+Porównamy teraz wyniki zwracane przez wszystkie wyżej wymienione modele.
+
+
+```{r, echo=FALSE}
+mod_hurdlenb = mod_hurdlenb2
+mod_hurdlep = mod_hurdlep2
+mod_zinbr = mod_zinbr2
+mod_zipr = mod_zipr2
+df_all = cbind(mod_pois$coefficients, mod_nb$coefficients, 
+               mod_zipr$coefficients$count, mod_zinbr$coefficients$count,
+               mod_hurdlep$coefficients$count, mod_hurdlenb$coefficients$count)
+
+t = cbind(NA, NA, mod_zipr$coefficients$zero, mod_zinbr$coefficients$zero,
+           mod_hurdlep$coefficients$zero, mod_hurdlenb$coefficients$zero)
+t = rbind(t, as.vector(c(NA, mod_nb$theta, NA, mod_zinbr$theta, NA, mod_hurdlenb$theta)))
+rownames(t)[nrow(t)] = "Theta ($\\alpha^{-1}$)"
+models = list(mod_pois, mod_nb, mod_zipr, mod_zinbr, mod_hurdlep, mod_hurdlenb)
+AIC = sapply(models, AIC)
+BIC = sapply(models, BIC)
+logL = sapply(models, logLik)
+params = sapply(models, function(m) attributes(logLik(m))$df)
+expected_zeros = c(sum(dpois(0, lambda = predict(mod_pois, type = "response"))),
+                  sum(dnbinom(0, size = mod_nb$theta, mu = predict(mod_nb, type = "response"))),
+                  sum(predict(mod_zipr, type = "prob")[,1]),
+                  sum(predict(mod_zinbr, type = "prob")[,1]),
+                  sum(predict(mod_hurdlep, type = "prob")[,1]),
+                  sum(predict(mod_hurdlenb, type = "prob")[,1]))
+
+df_all = rbind(df_all, t, AIC, BIC, logL, params, expected_zeros)
+rownames(df_all)[nrow(df_all)] = "E($\\#$Zeros)"
+colnames(df_all) = c("Poisson", "NB", "ZIPR", "ZINBR", "Hurdle (Pois)", "Hurdle (NB)")
+```
+
+```{r, echo=FALSE}
+kbl(df_all, booktabs=T, escape = F, digits=4) %>%
+    add_header_above(c(" ", "GLM" = 2, "Inflacja w zerze" = 4)) %>%
+    pack_rows("Model dla średniej", 1, 8) %>%
+    pack_rows("Model dla inflacji w zerze", 9, 14) %>%
+    pack_rows("Parametr dyspersji", 15, 15) %>%
+    pack_rows("Kryteria", 16, 17) %>%
+    pack_rows("Funkcja log-wiarogodności", 18,18) %>%
+    pack_rows("Ilość parametrów", 19,19) %>%
+    pack_rows("Oczekiwana liczba zer", 20,20) %>%
+    kable_styling(latex_options = c("hold_position"))
+```
+
+
+
+Estymatory parametrów regresji w modelu dla średniej są podobne dla każdego przypadku. Z kryterium AIC oraz BIC wynika, że najlepszy model to model ujemny dwumianowy z barierą, a zaraz po nim jest model ujemny dwumianowy z inflacją w zerze. Najsłabiej radzą sobie modele wykorzystujące rozkład Poissona. Odzwierciedla to fakt, że nadmierna dyspersja w danych jest lepiej wychwytywana przez modele oparte na rozkładzie ujemnym dwumianowym. Oprócz modelu GLM Poissona, wszystkie modele przewidują ilość zer dość dokładnie, zwłaszcza modele z barierą, gdzie oczekiwana ilość zer jest równa rzeczywistej wartości.  
+
+
+

@@ -1,0 +1,677 @@
+---
+title: "Zaawansowane modele liniowe - lista 4"
+author: "Klaudia Weigel"
+output: 
+  pdf_document: 
+    fig_caption: yes
+    highlight: tango
+    number_sections: yes
+header_includes:
+  - \usepackage{amsmath}
+  - \usepackage{amssymb}
+  - \usepackage{amsthm}
+  - \usepackage{listings}
+  - \theoremstyle{definition}
+  - \usepackage{bbm}
+  - \usepackage{booktabs}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.pos = "!ht", out.extra = "")
+options(knitr.kable.NA = ' ')
+library(mvtnorm)
+library(nlme)
+library(ggplot2)
+library(kableExtra)
+```
+
+# Zadanie 1
+Przyjmujemy oznaczenia:  
+
+* $n$ - liczba obiektów,  
+* $k$ – liczba pomiarów na każdym obiekcie,  
+* $p$ – liczba kolumn w macierzy planu,  
+* $N = n*k$ - liczba zmiennych objaśnianych $y_{ij}$.
+
+## Podpunkt a
+
+Dla $n = 20, k = 3, p = 4$ wygenerujemy macierz $X \in \mathbb{M}_{N \times p-1}$ taką, że jej elementy są niezależnymi realizacjami z rozkładu $N(0, 1/\sqrt{N})$. Do macierzy dodamy również kolumnę jedynek odpowiadającą interceptowi. Następnie podzielimy macierz na $n = N/k$ podmacierzy $X_1,\dots, X_n \in \mathbb{M}_{k \times p-1}$.
+
+```{r}
+n = 20
+k = 3
+p = 4
+N = n*k
+
+X = cbind(1, matrix(rnorm(N*(p-1), sd = 1/sqrt(N)), nrow = N, ncol = p-1))
+Xsplit = lapply(split(X, rep(c(1:n),each=k)), matrix, nrow=k)
+
+beta = c(0,3,3,0)
+rho = 0.3
+gamma = 2
+sigma = matrix(rho, nrow = k, ncol = k)
+diag(sigma) = 1
+sigma = gamma^2*sigma
+```
+
+Przyjmujemy $\beta = (\beta_0, \beta_1, \beta_2, \beta_3)' = (0,3,3,0)'$ oraz 
+$$
+\Sigma = \gamma^2\begin{pmatrix} 1 & \rho  & \dots & \rho \\ \rho & 1 & \dots & \rho \\ \vdots & \vdots & \ddots & \vdots \\ \rho & \rho & \dots & 1 \end{pmatrix} \in \mathbb{M}_{k \times k},
+$$
+gdzie $\gamma = 2$ oraz $\rho = 0.3$.
+
+
+
+## Podpunkt b
+
+Wygenerujemy $n$ niezależnych wektorów losowych
+$$
+y_i = (y_{i1}, \dots, y_{ik})' \sim N(X_i\beta, \Sigma) \in \mathbb{R}^k, \quad i = 1,2,\dots,n.
+$$
+
+Zapiszemy dane w jednowymiarowej reprezentacji.
+```{r}
+Y = lapply(Xsplit, function(X) rmvnorm(1, mean = X%*%beta, sigma = sigma))
+
+data_uni = lapply(1:n, function(i) cbind(t(Y[[i]]), rep(i, k), 1:k, Xsplit[[i]]))
+data_uni = do.call(rbind, data_uni)
+data_uni = data.frame(data_uni)
+colnames(data_uni) = c('y', 'id', 'T','X0', 'X1', 'X2', 'X3')
+head(data_uni)
+```
+
+Za pomocą funkcji $\texttt{gls}$ zbudujemy model liniowy.
+
+```{r}
+m1 = gls(y~X1+X2+X3, correlation = corCompSymm(form = ~1|id), 
+         weights = varIdent(form = ~1), method = "REML", data = data_uni)
+```
+
+## Podpunkt c
+
+### Wektor $\beta$
+
+Estymator wektora $\beta$, otrzymujemy z
+$$
+\hat{\beta} = \left(\sum_{i=1}^nX_i'\Sigma^{-1}X_i \right)^{-1}\left(\sum_{i=1}^nX_i'\Sigma^{-1}y_i\right).
+$$
+W tym punkcie za $\Sigma$ podstawimy estymator otrzymany metodą REML ($\hat{\Sigma}_{REML}$).  
+
+Estymator wektora $\beta$ ma asymptotycznie rozkład
+$$
+\hat{\beta} \rightarrow^d N\left( \beta, \left(\sum_{i=1}^n X_i' \hat{\Sigma}^{-1}X_i \right)^{-1}\right).
+$$
+
+W zadaniu będziemy korzystać z normy supremum, która dla wektora $x$ jest zdefiniowana jako:
+$$
+\|x\|_{sup} = \max_i |x_i|.
+$$
+Natomiast dla macierzy $X$:
+
+$$
+\|X\|_{sup} = \max_{i,j} |x_{ij}|.
+$$
+
+```{r}
+sigma_reml = getVarCov(m1)
+
+a1 = lapply(1:n, function(i) t(Xsplit[[i]])%*%solve(sigma_reml)%*%Xsplit[[i]])
+a1 = Reduce('+', a1) # zsumuj n macierzy
+a1 = solve(a1)
+
+b1 = lapply(1:n, function(i) t(Xsplit[[i]])%*%solve(sigma_reml)%*%t(Y[[i]]))
+b1 = Reduce('+', b1)
+
+beta_est_reml = a1%*%b1
+```
+
+```{r}
+t(beta_est_reml)
+```
+
+Porównamy wynik z tym zwracanym przez funkcję $\texttt{gls}$
+```{r}
+coef(m1)
+```
+
+Estymatory są takie same.  
+
+Norma supremum dla różnicy $\hat{\beta}$ oraz prawdziwych wartości:
+```{r}
+max(abs(beta_est_reml - beta))
+```
+
+Spójrzmy teraz na macierz kowariancji wektora $\beta$
+```{r}
+a1
+```
+
+Porównajmy wynik z funkcją $\texttt{vcov}$
+```{r}
+vcov(m1)
+```
+
+Otrzymane macierze są takie same.  
+
+
+Prawdziwą wartość macierzy kowariancji wektora $\beta$ obliczmy podstawiając pod $\Sigma$ macierz zadaną w poleceniu.
+```{r}
+cov_beta = lapply(1:n, function(i) t(Xsplit[[i]])%*%solve(sigma)%*%Xsplit[[i]])
+cov_beta = Reduce('+', cov_beta)
+cov_beta = solve(cov_beta)
+cov_beta
+```
+
+Norma supremum różnicy między prawdziwa macierzą kowariancji a jej estymatorem REML to:
+
+```{r}
+norm(cov_beta - a1, type = "M")
+```
+
+
+### Macierz $\Sigma$
+
+Przyjrzyjmy się teraz estymatorom parametrów $\rho$ oraz $\gamma$.  Ich wartości to
+```{r}
+cov2cor(sigma_reml)[1,2]; sqrt(sigma_reml[1,1])
+```
+
+
+```{r, echo=FALSE}
+corM = cov2cor(sigma_reml)
+wyn = cbind(beta, beta_est_reml, abs(beta_est_reml - beta))
+wyn  = rbind(wyn, c(rho, corM[1,2], abs(rho - corM[1,2])), c(gamma, sqrt(sigma_reml[1,1]), abs(gamma - sqrt(sigma_reml[1,1]))))
+colnames(wyn) = c("Wartość prawdziwa", "Estymator", "Wartość bezw. różnicy $|\\theta - \\hat{\\theta}|$")
+rownames(wyn) = c("$\\beta_0$", "$\\beta_1$", "$\\beta_2$", "$\\beta_3$", "$\\rho$", "$\\gamma$")
+
+sup_vec = c(norm(beta - beta_est_reml, type = 'M'), abs(rho - corM[1,2]), 
+            abs(gamma - sqrt(sigma_reml[1,1])), norm(cov_beta - a1, type = "M"))
+sup_vec = data.frame(sup_vec)
+sup_vec = t(sup_vec)
+colnames(sup_vec) = c('$\\hat{\\beta}$', "$\\hat{\\rho}$", "$\\hat{\\gamma}$", "$\\hat{\\Sigma}_{REML}$")
+rownames(sup_vec) = c('sup-norm')
+
+knitr::kable(wyn, escape=F, booktabs = T, linesep = '', digits = 4, format = "latex", caption = "Własności parametrów.") %>%
+  kable_styling(latex_options = c("hold_position")) %>%
+  pack_rows("Parametry beta", 1, 4) %>%
+  pack_rows("Rho", 5, 5) %>%
+  pack_rows("Gamma", 6, 6)%>%
+  column_spec(2:4, width = "2.5cm")
+```
+
+Wartości estymatorów generalnie są zbliżone do prawdziwych wartości, ich wartości są jednak silnie zależne od próby. 
+
+
+```{r, echo=FALSE}
+knitr::kable(sup_vec, escape = F, booktabs= T, format = 'latex', caption = "Norma supremum różnicy.")%>%
+  kable_styling(latex_options = "hold_position")
+```
+
+
+# Zadanie 2
+
+Wygenerujemy 500 replikacji wektora $Y$ i skonstruujemy przy ich pomocy modele liniowe z których następnie wyznaczymy 500 replikacji wektora $\hat{\beta}$, $\hat{\rho}$ oraz $\hat{\gamma}$.
+
+```{r}
+sim = function(Xsplit) {
+  rep = 500; N = n*k
+  beta_rep = matrix(nrow = rep, ncol = p); gamma_rep = numeric(length = rep)
+  rho_rep = numeric(length = rep)
+  
+  for (i in 1:rep) {
+    Y = lapply(Xsplit, function(X) rmvnorm(1, mean = X%*%beta, sigma = sigma))
+    data_uni = lapply(1:n, function(i) cbind(t(Y[[i]]), rep(i, k), 1:k, Xsplit[[i]]))
+    data_uni = do.call(rbind, data_uni)
+    data_uni = data.frame(data_uni); colnames(data_uni) = c('y', 'id', 'T', paste0("X", 0:(p-1)))
+    if(p == 4) { 
+      m = gls(y~. -id-T-X0, correlation = corCompSymm(form = ~1|id), 
+              weights = varIdent(form = ~1), method = "REML", data = data_uni) }
+    else {
+      m = gls(y~. -id-T-X0, correlation = corCompSymm(form = ~1|id), 
+              weights = varIdent(form = ~1), data = data_uni, 
+              control = glsControl(opt='optim')) }
+    beta_rep[i,] = coef(m); covM = getVarCov(m)
+    rho_rep[i] = cov2cor(covM)[1,2]; gamma_rep[i] = sqrt(covM[1,1])
+  }
+  colnames(beta_rep) = paste0("b", 0:(p-1))
+  return(list(b = beta_rep, r = rho_rep, g = gamma_rep))
+}
+# Kowariancja asymptotyczna wektora beta
+avar = lapply(1:n, function(i) t(Xsplit[[i]])%*%solve(sigma)%*%Xsplit[[i]])
+avar = Reduce('+', avar); avar = solve(avar)
+res_z2 = sim(Xsplit)
+```
+
+```{r, echo=FALSE}
+p1 = ggplot(data = data.frame(res_z2$b), aes(x = b0)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 0, sd = sqrt(avar[1,1]))) +
+  labs(title =  expression(paste("Estymator parametru ", beta[0])))
+
+p2 = ggplot(data = data.frame(res_z2$b), aes(x = b1)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(avar[2,2]))) +
+  labs(title =  expression(paste("Estymator parametru ", beta[1])))
+```
+
+
+```{r, echo=FALSE}
+p3 = ggplot(data = data.frame(res_z2$r), aes(x = res_z2.r)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  labs(title =  expression(paste("Estymator parametru ", rho))) +
+  xlab("rho")
+
+p4 = ggplot(data = data.frame(res_z2$g), aes(x = res_z2.g)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  labs(title =  expression(paste("Estymator parametru ", gamma))) +
+  xlab("gamma")
+```
+
+
+```{r, fig.height=4.3, warning=FALSE, message=FALSE, echo=FALSE, fig.cap="Histogramy dla $n = 20, k=3, p=4$."}
+cowplot::plot_grid(p1, p2, p3, p4, ncol = 2)
+```
+
+Widzimy, ze histogramy są bliskie rozkładom asymptotycznym. Ponieważ rozmiar próby jest mały, to dane są dość mocno rozrzucone. Wartości są skoncentrowane wokół prawdziwych wartości, choć pojawiają się znaczące odchylenia.
+
+
+# Zadanie 3
+Ponownie wykonamy symulacje z zadania 2 dla $n = 500$.
+
+```{r, echo=FALSE}
+n = 500
+N = n*k
+
+X = cbind(1, matrix(rnorm(N*(p-1), sd = 1/sqrt(N)), nrow = N, ncol = p-1))
+Xsplit = lapply(split(X, rep(c(1:n),each=k)), matrix, nrow=k)
+```
+
+```{r, echo=FALSE}
+# Kowariancja asymptotyczna wektora beta
+avar = lapply(1:n, function(i) t(Xsplit[[i]])%*%solve(sigma)%*%Xsplit[[i]])
+avar = Reduce('+', avar)
+avar = solve(avar)
+
+res_z3 = sim(Xsplit)
+```
+
+```{r, echo=FALSE}
+p1 = ggplot(data = data.frame(res_z3$b), aes(x = b0)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 0, sd = sqrt(avar[1,1]))) +
+  labs(title =  expression(paste("Estymator parametru ", beta[0])))
+
+p2 = ggplot(data = data.frame(res_z3$b), aes(x = b1)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(avar[2,2]))) +
+  labs(title =  expression(paste("Estymator parametru ", beta[1])))
+```
+
+
+```{r, echo=FALSE}
+p3 = ggplot(data = data.frame(res_z3$r), aes(x = res_z3.r)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  labs(title =  expression(paste("Estymator parametru ", rho))) +
+  xlab("rho")
+
+p4 = ggplot(data = data.frame(res_z3$g), aes(x = res_z3.g)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  labs(title =  expression(paste("Estymator parametru ", gamma))) +
+  xlab("gamma")
+```
+
+
+```{r, fig.height=4.3, warning=FALSE, message=FALSE, echo=FALSE, fig.cap="Histogramy dla $n = 500, k=3, p=4$."}
+cowplot::plot_grid(p1, p2, p3, p4, ncol = 2)
+```
+
+Histogramy są bliskie rozkładom asymptotycznym. W porównaniu do przypadku gdy $n = 20$, wahania w danych są mniejsze i estymatory są wyznaczane z większą dokładnością. 
+
+# Zadanie 4
+
+Ponownie wykonamy symulacje z zadania 2 dla $k = 30$.
+
+```{r, echo=FALSE}
+k = 30; n = 20; N = n*k
+```
+
+```{r, echo=FALSE}
+k = 30; n = 20; N = n*k
+X = cbind(1, matrix(rnorm(N*(p-1), sd = 1/sqrt(N)), nrow = N, ncol = p-1))
+Xsplit = lapply(split(X, rep(c(1:n),each=k)), matrix, nrow=k)
+sigma = matrix(rho, nrow = k, ncol = k)
+diag(sigma) = 1
+sigma = gamma^2*sigma
+
+avar = lapply(1:n, function(i) t(Xsplit[[i]])%*%solve(sigma)%*%Xsplit[[i]])
+avar = Reduce('+', avar)
+avar = solve(avar)
+
+res_z4 = sim(Xsplit)
+```
+
+
+```{r, echo=FALSE}
+p1 = ggplot(data = data.frame(res_z4$b), aes(x = b0)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 0, sd = sqrt(avar[1,1]))) +
+  labs(title =  expression(paste("Estymator parametru ", beta[0])))
+
+p2 = ggplot(data = data.frame(res_z4$b), aes(x = b1)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(avar[2,2]))) +
+  labs(title =  expression(paste("Estymator parametru ", beta[1])))
+```
+
+
+```{r, fig.height=2.1, warning=FALSE, message=FALSE, echo=FALSE, fig.cap="Histogramy $\\hat{\\beta}_0$ oraz $\\hat{\\beta}_1$, dla $n= 20, k = 30, p = 4$."}
+cowplot::plot_grid(p1, p2)
+```
+
+
+```{r, echo=FALSE}
+p1 = ggplot(data = data.frame(res_z4$r), aes(x = res_z4.r)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  labs(title =  expression(paste("Estymator parametru ", rho))) +
+  xlab("rho")
+
+p2 = ggplot(data = data.frame(res_z4$g), aes(x = res_z4.g)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  labs(title =  expression(paste("Estymator parametru ", gamma))) +
+  xlab("gamma")
+```
+
+
+```{r, fig.height=2.3, warning=FALSE, message=FALSE, echo=FALSE, fig.cap="Histogramy $\\hat{\\rho}$ oraz $\\hat{\\gamma}$ dla $n = 20, k=30, p=4$."}
+cowplot::plot_grid(p1, p2)
+```
+
+Estymatory dla $k=30$ są zbliżone do przypadku gdy $n=20$, choć wartości skrajne są nieco mniejsze.
+
+# Zadanie 5
+
+Tym razem zwiększymy wartość $p$ do 40.
+
+```{r, echo=FALSE}
+p = 40
+n = 20
+k = 3
+N = n*k
+X = cbind(1, matrix(rnorm(N*(p-1), sd = 1/sqrt(N)), nrow = N, ncol = p-1))
+
+Xsplit = lapply(split(X, rep(c(1:n),each=k)), matrix, nrow=k)
+
+beta = c(0,3,3,0, rep(0, 36))
+sigma = matrix(rho, nrow = k, ncol = k)
+diag(sigma) = 1
+sigma = gamma^2*sigma
+
+avar = lapply(1:n, function(i) t(Xsplit[[i]])%*%solve(sigma)%*%Xsplit[[i]])
+avar = Reduce('+', avar)
+avar = solve(avar)
+
+res_z5 = sim(Xsplit)
+```
+
+
+```{r, echo=FALSE}
+p1 = ggplot(data = data.frame(res_z5$b), aes(x = b0)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 0, sd = sqrt(avar[1,1]))) +
+  labs(title =  expression(paste("Estymator parametru ", beta[0])))
+
+p2 = ggplot(data = data.frame(res_z5$b), aes(x = b1)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(avar[2,2]))) +
+  labs(title =  expression(paste("Estymator parametru ", beta[1])))
+```
+
+
+```{r, echo=FALSE}
+p3 = ggplot(data = data.frame(res_z5$r), aes(x = res_z5.r)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  labs(title =  expression(paste("Estymator parametru ", rho))) +
+  xlab("rho")
+
+p4 = ggplot(data = data.frame(res_z5$g), aes(x = res_z5.g)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  labs(title =  expression(paste("Estymator parametru ", gamma))) +
+  xlab("gamma")
+```
+
+
+```{r, fig.height=4.5, warning=FALSE, message=FALSE, echo=FALSE, fig.cap="Histogramy dla $n = 20, k=3, p=40$."}
+cowplot::plot_grid(p1, p2, p3, p4, ncol = 2)
+```
+
+Estymatory osiągają bardziej skrajne wartości niż w poprzednich zadaniach. Estymacja dla wielu przypadków jest mało dokładna.
+
+\newpage
+
+# Podsumowanie wyników z zadań 2-5
+
+```{r, echo=FALSE}
+get_bias = function(estimate, truth) {
+  mean(estimate) - truth
+}
+bias_beta = matrix(nrow = 4, ncol = 4)
+var_beta = matrix(nrow = 4, ncol = 4)
+mean_beta = matrix(nrow = 4, ncol = 4)
+sup_norm_beta = matrix(nrow = 4, ncol = 4)
+bias_rho = numeric(length = 4)
+bias_gamma = numeric(length = 4)
+
+bias_beta[,1] = sapply(1:4, function(i) get_bias(res_z2$b[,i], beta[i]))
+bias_beta[,2] = sapply(1:4, function(i) get_bias(res_z3$b[,i], beta[i]))
+bias_beta[,3] = sapply(1:4, function(i) get_bias(res_z4$b[,i], beta[i]))
+bias_beta[,4] = sapply(1:4, function(i) get_bias(res_z5$b[,i], beta[i]))
+
+var_beta[,1] = apply(res_z2$b, 2, var)
+var_beta[,2] = apply(res_z3$b, 2, var)
+var_beta[,3] = apply(res_z4$b, 2, var)
+var_beta[,4] = apply(res_z5$b, 2, var)[1:4]
+
+mean_beta[,1] = apply(res_z2$b, 2, mean)
+mean_beta[,2] = apply(res_z3$b, 2, mean)
+mean_beta[,3] = apply(res_z4$b, 2, mean)
+mean_beta[,4] = apply(res_z5$b, 2, mean)[1:4]
+
+sup_norm_beta[,1] = apply(abs(res_z2$b), 2, max)
+sup_norm_beta[,2] = apply(abs(res_z3$b), 2, max)
+sup_norm_beta[,3] = apply(abs(res_z4$b), 2, max)
+sup_norm_beta[,4] = apply(abs(res_z5$b), 2, max)[1:4]
+
+res_all = cbind(c(20, 500,20,20), c(3,3,30,3), c(4,4,4,40), t(bias_beta), rep(NA, 4), t(sup_norm_beta))
+colnames(res_all) = c('n', "k", "p", "$\\hat{\\beta}_0$", "$\\hat{\\beta}_1$", "$\\hat{\\beta}_2$", "$\\hat{\\beta}_3$", " ", "$\\hat{\\beta}_0$", "$\\hat{\\beta}_1$", "$\\hat{\\beta}_2$", "$\\hat{\\beta}_3$")
+```
+
+
+```{r, echo=F}
+knitr::kable(res_all, booktabs = T, linesep = '', escape = F, format = 'latex', digits = 3, caption = "Własności estymatora $\\hat{\\beta}$.") %>%
+  add_header_above(c(" ", " ", " ",  "Obciążenie$(\\\\hat{\\\\beta_i}) = E(\\\\hat{\\\\beta_i}) - \\\\beta_i$" = 4, " ", "$||\\\\hat{\\\\beta_i}||_{sup}$" = 4), escape = F) %>%
+  kable_styling(latex_options = c("hold_position")) %>%
+  column_spec(8, width = "0.1cm")
+```
+
+```{r, echo=FALSE}
+res_var = cbind(c(20, 500,20,20), c(3,3,30,3), c(4,4,4,40), t(var_beta), t(mean_beta))
+colnames(res_var) = c('n', "k", "p", "$var(\\hat{\\beta}_0)$", "$var(\\hat{\\beta}_1)$", "$var(\\hat{\\beta}_2)$", "$var(\\hat{\\beta}_3)$", "$E(\\hat{\\beta}_0)$", "$E(\\hat{\\beta}_1)$", "$E(\\hat{\\beta}_2)$", "$E(\\hat{\\beta}_3)$")
+knitr::kable(res_var, booktabs = T, escape = F, caption = "Wariancja i średnia estymatorów $\\hat{\\beta}_i$.", digits = 3) %>%
+  kable_styling(latex_options = c("hold_position"))
+```
+
+```{r, echo=FALSE}
+mean_rho = numeric(length = 4)
+mean_gamma = numeric(length = 4)
+var_rho = numeric(length = 4)
+var_gamma = numeric(length = 4)
+
+bias_rho[1] = get_bias(res_z2$r, rho)
+bias_rho[2] = get_bias(res_z3$r, rho)
+bias_rho[3] = get_bias(res_z4$r, rho)
+bias_rho[4] = get_bias(res_z5$r, rho)
+mean_rho[1] = mean(res_z2$r)
+mean_rho[2] = mean(res_z3$r)
+mean_rho[3] = mean(res_z4$r)
+mean_rho[4] = mean(res_z5$r)
+
+var_rho[1] = var(res_z2$r)
+var_rho[2] = var(res_z3$r)
+var_rho[3] = var(res_z4$r)
+var_rho[4] = var(res_z5$r)
+
+bias_gamma[1] = get_bias(res_z2$g, gamma)
+bias_gamma[2] = get_bias(res_z3$g, gamma)
+bias_gamma[3] = get_bias(res_z4$g, gamma)
+bias_gamma[4] = get_bias(res_z5$g, gamma)
+mean_gamma[1] = mean(res_z2$g)
+mean_gamma[2] = mean(res_z3$g)
+mean_gamma[3] = mean(res_z4$g)
+mean_gamma[4] = mean(res_z5$g)
+var_gamma[1] = var(res_z2$g)
+var_gamma[2] = var(res_z3$g)
+var_gamma[3] = var(res_z4$g)
+var_gamma[4] = var(res_z5$g)
+
+res_rg = cbind(c(20, 500,20,20), c(3,3,30,3), c(4,4,4,40), bias_rho, bias_gamma)
+colnames(res_rg) = c('n', 'k', 'p', "$E(\\hat{\\rho}) - \\rho$", "$E(\\hat{\\gamma}) - \\gamma$")
+```
+
+```{r, echo=FALSE}
+res_rg2 = cbind(rep(c(20, 500,20,20), 2), rep(c(3,3,30,3), 2), rep(c(4,4,4,40), 2), t(cbind(t(bias_rho), t(bias_gamma))), t(cbind(t(mean_rho), t(mean_gamma))), t(cbind(t(var_rho), t(var_gamma))))
+colnames(res_rg2) = c("n", "k", "p", "Obciążenie", "Średnia", "Wariancja")
+
+
+kbl(res_rg2, booktabs = T, format = 'latex', escape = F, caption = "Własności macierzy $\\hat{\\Sigma}_{REML}$.") %>% 
+  kable_styling(latex_options = c("hold_position")) %>%
+  pack_rows("Rho", 1, 4) %>%
+  pack_rows("Gamma", 5, 8)
+```
+
+
+Najgorzej zachowują się estymatory w przypadku $p = 40$. Większa ilość predyktorów wpływa na zwiększenie obciążenia estymatora jak i wariancji, zatem estymacja jest mniej dokładna. Osiągane wartości skrajne są znacznie większe niż dla pozostałych przypadków. Drugie największe obciążenie mają estymatory dla $n=20$, co jest naturalne jako że mała ilość obiektów nie pozwala nam na dokładne wyestymowanie parametrów. Najlepsze wyniki są osiągane dla $n = 500$ oraz dla $k=30$. Warto też zauważyć, że estymatory $\rho$ oraz $\gamma$ mają generalnie ujemne obciążenie, czyli estymator kowariancji REML raczej ściąga wartości do zera.
+
+
+
+# Zadanie 6
+Powtórzymy zadanie 2, tym razem używając do estymacji macierzy kowariancji metody ML.
+
+\newpage
+```{r, echo=FALSE}
+n = 20
+k = 3
+p = 4
+N = n*k
+
+X = cbind(1, matrix(rnorm(N*(p-1), sd = 1/sqrt(N)), nrow = N, ncol = p-1))
+Xsplit = lapply(split(X, rep(c(1:n),each=k)), matrix, nrow=k)
+
+beta = c(0,3,3,0)
+rho = 0.3
+gamma = 2
+
+sigma = matrix(rho, nrow = k, ncol = k)
+diag(sigma) = 1
+sigma = gamma^2*sigma
+
+sim2 = function(Xsplit) {
+  rep = 500
+  N = n*k
+  
+  beta_rep = matrix(nrow = rep, ncol = p)
+  gamma_rep = numeric(length = rep)
+  rho_rep = numeric(length = rep)
+  
+  for (i in 1:rep) {
+    Y = lapply(Xsplit, function(X) rmvnorm(1, mean = X%*%beta, sigma = sigma))
+    data_uni = lapply(1:n, function(i) cbind(t(Y[[i]]), rep(i, k), 1:k, Xsplit[[i]]))
+    data_uni = do.call(rbind, data_uni)
+    data_uni = data.frame(data_uni)
+    colnames(data_uni) = c('y', 'id', 'T', paste0("X", 1:p))
+    m = gls(y~. -id-T-X1, correlation = corCompSymm(form = ~1|id), 
+            weights = varIdent(form = ~1), method = "ML", data = data_uni)
+    beta_rep[i,] = coef(m)
+    covM = getVarCov(m)
+    rho_rep[i] = cov2cor(covM)[1,2]
+    gamma_rep[i] = sqrt(covM[1,1])
+  }
+  
+  colnames(beta_rep) = paste0("b", 0:(p-1))
+  return(list(b = beta_rep, r = rho_rep, g = gamma_rep))
+}
+# Kowariancja asymptotyczna wektora beta
+avar = lapply(1:n, function(i) t(Xsplit[[i]])%*%solve(sigma)%*%Xsplit[[i]])
+avar = Reduce('+', avar)
+avar = solve(avar)
+
+res_z6= sim2(Xsplit)
+```
+
+
+
+```{r, echo=FALSE}
+p1 = ggplot(data = data.frame(res_z6$b), aes(x = b0)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 0, sd = sqrt(avar[1,1]))) +
+  labs(title =  expression(paste("Estymator parametru ", beta[0])))
+
+p2 = ggplot(data = data.frame(res_z6$b), aes(x = b1)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  stat_function(fun = dnorm, args=list(mean = 3, sd = sqrt(avar[2,2]))) +
+  labs(title =  expression(paste("Estymator parametru ", beta[1])))
+```
+
+
+```{r, echo=FALSE}
+p3 = ggplot(data = data.frame(res_z6$r), aes(x = res_z6.r)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  labs(title =  expression(paste("Estymator parametru ", rho))) +
+  xlab("rho")
+
+p4 = ggplot(data = data.frame(res_z6$g), aes(x = res_z6.g)) +
+  geom_histogram(aes(y =..density..), alpha=0.5, color="slateblue", fill='slateblue') +
+  labs(title =  expression(paste("Estymator parametru ", gamma))) +
+  xlab("gamma")
+```
+
+
+```{r, fig.height=4.4, warning=FALSE, message=FALSE, echo=FALSE, fig.cap="Histogramy dla $n = 20, k=3, p=4$, estymacja metodą ML."}
+cowplot::plot_grid(p1, p2, p3, p4, ncol = 2)
+```
+
+
+```{r, echo=FALSE}
+res_rg2 = cbind(rep(c(20), 2), rep(c(3), 2), rep(c(4), 2), rbind(get_bias(res_z6$r, rho), get_bias(res_z6$g, gamma)), rbind(mean(res_z6$r), mean(res_z6$g)))
+colnames(res_rg2) = c("n", "k", "p", "Obciążenie", "Średnia")
+
+
+kbl(res_rg2, booktabs = T, format = 'latex', escape = F, caption = "Własności $\\hat{\\Sigma}_{ML}$") %>% 
+  kable_styling(latex_options = c("hold_position")) %>%
+  pack_rows("Rho", 1, 1) %>%
+  pack_rows("Gamma", 2, 2)
+```
+
+Widzimy, że wartość bezwzględna obciążenia estymatorów jest większa niż w przypadku estymacji metodą REML. Obciążenie jest ujemne, a wartości średnie estymatorów są mniejsze od prawdziwych wartości parametrów. Potwierdza to teorię, iż estymator uzyskany metodą ML ściąga do zera silniej niż estymator REML. 
+
+```{r, echo=FALSE}
+
+bias_beta = sapply(1:4, function(i) get_bias(res_z6$b[,i], beta[i]))
+
+var_beta = apply(res_z6$b, 2, var)
+
+mean_beta = apply(res_z6$b, 2, mean)
+
+sup_norm_beta = apply(abs(res_z2$b), 2, max)
+```
+
+
+```{r, echo=F}
+res_all  = cbind(bias_beta, sup_norm_beta, mean_beta, var_beta)
+rownames(res_all) = c("$\\hat{\\beta}_0$", "$\\hat{\\beta}_1$", "$\\hat{\\beta}_2$", "$\\hat{\\beta}_3$")
+colnames(res_all) = c("Obciążenie", "Sup-norm", "Średnia", "Wariancja")
+knitr::kable(res_all, booktabs = T, linesep = '', escape = F, format = 'latex', digits = 3, caption = "Własności estymatora $\\hat{\\beta}$, metoda ML.") %>%
+  kable_styling(latex_options = c("hold_position"))
+```
+
+Jeśli chodzi o estymatory $\hat{\beta}$, to nie widać znaczącej różnicy w porównaniu do wyników z poprzedniego zadania.
+

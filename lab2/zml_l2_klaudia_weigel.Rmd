@@ -1,0 +1,393 @@
+---
+title: "Zaawansowane Modele Liniowe - Lista 2"
+author: "Klaudia Weigel"
+output: 
+  pdf_document: 
+    fig_caption: yes
+    highlight: tango
+    number_sections: yes
+
+header_includes:
+  - \usepackage{amsmath}
+  - \usepackage{amssymb}
+  - \usepackage{amsthm}
+  - \usepackage{listings}
+  - \theoremstyle{definition}
+  - \usepackage{bbm}
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.pos = "!ht", out.extra = "")
+library(ggplot2)
+library(kableExtra)
+library(broom)
+library(dplyr)
+library(gtools)
+```
+
+
+# Zadanie 1
+
+Mamay zbiór danych zawierający informacje, o liczbie klientów przychodzących do pewnego sklepu w okresie około trzech miesięcy. 
+```{r}
+df_sklep = read.csv("sklep")
+df_sklep = df_sklep[,2:5]
+df_sklep[1:3,]
+```
+
+Dane przeanalizujemy za pomocą reresji Poissona traktując liczbę obsłużonych klientów jako zmienną objaśnianą, a pozostałe zmienne jako potencjalne predyktory.
+
+# Zadanie 2
+
+Spójrzmy najpierw na boxploty zmiennej objaśnianej w zależności od każdego z predyktorów oddzielnie.
+
+## Day
+
+```{r, echo=FALSE, out.width="310px", fig.align='center'}
+ggplot(data = df_sklep, aes(x=as.factor(day), y=no.klients)) +
+  geom_boxplot() +
+  xlab("day")
+```
+
+
+Widzimy, że w sobotę oraz niedzielę liczba klientów jest zdecydowanie niższa niż w pozostałych dniach. Mediana w obu przypadkach wynosi około 15, zatem połowa wartości dla tych dni jest mniejsza niż 15. Rozkłady dla dni roboczych sa bardzo podobne i są niesymetryczne. Sugeruje to, że mamy do czynienia ze skośnych rozkładem. Ponieważ dużo więcej wartości jest powyżej mediany to rozkład jest prawostronnie skośny.
+
+
+## Events
+
+```{r, echo=FALSE, out.width="310px", fig.align='center'}
+ggplot(data = df_sklep, aes(x=as.factor(events), y=no.klients)) +
+  geom_boxplot() +
+  xlab("events")
+```
+
+
+Zróżnicowanie ilości klientów ze względu na zmienną *events* jest bardzo nieznaczne. Prawdopodobnie ta zmienna nie będzie istotnie wpływać na zmienną objaśnianą.
+
+## Hour
+
+```{r, echo=FALSE, out.width="350px", fig.align='center'}
+ggplot(data = df_sklep, aes(x=as.factor(hour), y=no.klients)) +
+  geom_boxplot() +
+  xlab("hour")
+```
+
+Możemy podzielić dane ze względu na cztery przedziały czasowe $[8,11]$, $[12, 15]$, $[16,19]$, oraz $[20, 23]$. Najmniej klientów jest w godzinach $[12, 15]$. Maksymalna ilość klientów jest osiągana dla godzin $[16, 19]$. Rozkład dla tych godzin jest też mocno asymetryczny, większeość obserwacji leży poniżej mediany.
+
+
+## Wykresy
+
+Przeanalizujemy teraz związek pomiędzy zmienną objaśnianą i predyktorami przy użyciu dodatkowych wykresów.
+
+```{r, echo=FALSE, out.width='350px',  fig.align='center', fig.cap="Zależność \\textit{y} od godziny w rozbiciu na \\textit{dzień} i \\textit{wydarzenie sportowe}."}
+qplot(hour,no.klients, shape = as.factor(events),col = day, data = df_sklep)
+```
+
+Z wykresu widzimy, że w weekend do sklepu przychodzi najmniej klientów. Dane dla tych dni rozłożone są równomiernie ze względu na godziny. 
+
+```{r, echo=FALSE, fig.height=3.4, fig.align='center', fig.cap="Rozbicie na podgrupy ze względu na \\textit{wydarzenie sportowe}."}
+qplot(hour,no.klients, facets = events ~ day, data = df_sklep)
+```
+
+Rozproszenie danych jest bardzo podobne pomiędzy różnymi dniami roboczymi, jak i pomiędzy dniami weekendowymi. Nie widać znaczących róznic ze względu na zmienną *events*.
+
+```{r, echo=FALSE, out.width='350px', fig.align='center', fig.cap="Zależność y od godziny w rozbiciu na \\textit{dzień tygodnia}."}
+qplot(hour,no.klients, color = day, data = df_sklep)
+```
+
+
+```{r, echo=FALSE, fig.align='center'}
+qplot(hour,no.klients, facets = ~day, data = df_sklep)
+```
+Z powyższych wykresów widać, że wśród dni roboczych możemy wyraźnie wyróżnić cztery grupy, te same które zaobserwowaliśmy już przy boxplocie $y\sim hour$, czyli $[8,11]$, $[12, 15]$, $[16,19]$, oraz $[20, 23]$. Sugeruje to, że zamiast analizować dane ze względu na każdą z godzin osobno możemy podzielić dane na cztery grupy godzinowe. W dni weekendowe rozkład klientów jest jednostajny i nie ma istotnej różnicy pomiędzy sobotą i niedzielą.
+
+
+
+# Zadanie 3
+
+Regresja Poissona zakłada, że zmienne objaśniane $y_i$ sa realizacjami niezależnych zmiennych losowych z rozkładu Poissona ze średnią $\lambda_i$.
+
+$$
+\text{log}(\lambda_i) = \beta_0 + x_{i,1}\beta_1 + \dots + x_{i,p-1}\beta_{p-1}.
+$$
+
+## Model z podwójnymi interakcjami
+Rozważymy najpierw model zawierający jako zmienne pojedyncze predyktory oraz podwójne interakcje pomiędzy nimi (bez interakcji pomiędzy wszystkimi trzema predyktorami).
+
+```{r}
+df_sklep_factors = df_sklep
+df_sklep_factors$day = as.factor(df_sklep_factors$day)
+df_sklep_factors$events = as.factor(df_sklep_factors$events)
+df_sklep_factors$hour = as.factor(df_sklep_factors$hour)
+
+m1_2 = glm(no.klients ~ day*events + hour*day + hour*events, data = df_sklep_factors, 
+           family = "poisson")
+```
+Ilość zmiennych możemy łatwo obliczyć znając liczbę stanów każdego regresora. Każdy dodatkowy predyktor przyjumujący $k$ wartości zwiększy liczbę zmiennych o $k-1$. Ilość zmiennych odpowiadających interakcji jest iloczynem ilości zmiennych odpowiadających każdemu składnikowi interakcji. Ponieważ predyktorów mamy 3 - *events*, *hour* oraz *day*, przyjmujących odpowiednio 2, 16 i 7 różnych wartości to ilość zmiennych (oprócz interceptu) wynosi:
+$$
+1+ 6 + 15 + 1*6 + 1*15 + 6*15 = 133.
+$$
+Dodając intercept, dostajemy 134 zmienne.
+
+Dana zmienna jest istotna jeżeli odpowidający jej współczynnik regresji jest różny od zera. Istotność współczynników regresji badamy za pomocą statystyki:
+$$
+T_i = \frac{\hat{\beta}_i}{se(\hat{\beta}_i)}.
+$$
+Przy $H_0$ statystyka ma asymptotycznie rozklad $N(0,1)$. Odrzucamy hipotezę zerową gdy wartość $|T_i|$ jest większa od kwantyla rzędu $1-\alpha/2$ z rozkładu normalnego $N(0,1)$, gdzie $\alpha$ jest ustalonym poziomem istotności. W zadaniach bedziemy rozważać $\alpha = 0.05$.
+
+
+Sprawdźmy ile współczynników jest istotnych dla poziomu istotności 0.05.
+```{r}
+nrow(summary(m1_2)$coef[summary(m1_2)$coef[,4] <= 0.05,])
+```
+
+Spośród 134 współczynników, 30 jest istotnych.
+
+```{r, echo=FALSE}
+kbl(summary(m1_2)$coef[summary(m1_2)$coef[,4] <= .05,], format = "markdown", caption = "Tabela regresji Poissona (podwójne interakcje), tylko istotne współczynniki.")
+```
+
+Ani jedna istotna zmienna nie zależy od *events*, mimo że łączna ilość zmiennych zależnych of tego regresora to $1 + 6 + 15 = 23$. Możemy sprawdzić, czy regresor *events* wnosi coś do modelu za pomocą testu chi-kwadrat opartego na statystyce deviance. Hipoteza zerowa odpowiada modelowi zredukowanemu ($M_R$), w którym niektóre współczynniki zostały wyzerowane, a hipoteza alternatywna związana jest z modelem bez żadnych warunków ($M_F$) czyli
+$$
+H_0:\forall(i\in A)\ \beta_i = 0 \quad H_1:\exists(i\in A) \ \beta_i \neq 0.
+$$
+Statystyka testowa to 
+$$
+\chi^2 = D(M_R) - D(M_F).
+$$
+Przy hipotezie zerowej statystyka ma rozkład $\chi^2$ ze stopniami swobody równymi ilości wyzerowanych współczynników w modelu zredukowanym ($df = |A|$).
+
+```{r}
+m1_noevents <- glm(no.klients ~ hour*day, data = df_sklep_factors, family = "poisson")
+```
+
+```{r}
+anova(m1_noevents, m1_2, test = "Chisq")
+```
+
+P-wartość jest większa niż ustalony poziom istotności, nie mamy zatem podstaw aby odrzucić hipotezę zerową. Przyjmujemy model zredukowany bez regresora *events*.
+
+## Model z potrójnymi interakcjami
+
+Poszerzymy teraz model rozważany w poprzednim punkcie o potrójne interakcje pomiędzy wszystkimi trzema regresorami.  
+
+Ilość zmiennych w tym przypadku wynosi:
+
+$$
+1+ 6 + 15 + 1*6 + 1*15 + 6*15 + 1*6*15 = 223.
+$$
+Nasz model ma 223 współczynniki, 224 włącznie z interceptem.  
+
+Istotność współczynników regresji badamy tak samo jak wyżej, za pomocą statystki
+$$
+T_i = \frac{\hat{\beta}_i}{se(\hat{\beta}_i)}.
+$$
+
+```{r}
+m1_3 = glm(no.klients ~ day*events*hour, data = df_sklep_factors, family = "poisson")
+```
+
+Sprawdźmy ile współczynników jest istotnych dla poziomu istotności 0.05.
+```{r}
+nrow(summary(m1_3)$coef[summary(m1_3)$coef[,4] <= 0.05,])
+```
+
+Spośród 224 współczynników, tylko 34 są istotne.
+
+```{r, echo=FALSE}
+kbl(summary(m1_3)$coef[summary(m1_3)$coef[,4] <= .05,], format = "markdown", caption = "Tabela regresji Poissona, tylko istotne zmienne.")
+```
+
+Tym razem istotnych jest 10 zmiennych zależących od regresora *events* na poziomie istotności 0.05. Łącznie zmiennych zależnych od *events* jest $1 + 6 + 15 + 6*15 = 112$.  
+
+Możemy porównać model z modelami rozważanymi w poprzednim punkcie, czyli z modelem bez regresora *events* oraz modelem tylko z podwójnymi interakcjami. 
+
+```{r}
+anova(m1_noevents, m1_3, test="Chisq")
+```
+
+```{r}
+anova(m1_2, m1_3, test="Chisq")
+```
+
+W obu przypadkach p-wartość jest większa od ustalonego poziomu istotności. Odrzucamy model z potrójnymi interakcjami.
+
+
+# Zadanie 4
+
+Stworzymy dwie nowe zmienne. Pierwsza, opisująca to czy dzień jest dniem roboczym czy weekendowym. Druga grupująca godziny każdego dnia w bloki cztero-godzinne.
+
+```{r}
+df_sklep_new = df_sklep
+# workingday - 1 if the day is a working day
+df_sklep_new$workingday = sapply(df_sklep_new$day, 
+                                 function(d) 1 - (d %in% c("Saturday", "Sunday"))*1 )
+df_sklep_new$timeslot = cut(df_sklep_new$hour, c(8,12,16,20,23), 
+                            right = FALSE, include.lowest = TRUE)
+df_sklep_new$timeslot = as.factor(df_sklep_new$timeslot)
+df_sklep_new$workingday = as.factor(df_sklep_new$workingday)
+
+m2 = glm(no.klients~timeslot*workingday, data = df_sklep_new, family = "poisson")
+```
+
+Ilość współczynników w tym modelu to
+```{r}
+length(m2$coefficients)
+```
+
+W tym ilość istotnych współczynników dla $\alpha = 0.05$:
+
+```{r}
+nrow(summary(m2)$coef[summary(m2)$coef[,4] <= 0.05,])
+```
+
+```{r, echo=FALSE}
+
+kbl(m2 %>% tidy %>% mutate(signif = stars.pval(p.value)), format = "markdown", caption = "Tabela regresji Poissona dla modelu z pogrupowanymi danymi.")
+```
+
+
+Sprawdzimy teraz czy nowy model statystycznie różni się od modelu z zadania 4. Ponieważ modele są zagnieżdżone, to do ich porównania możemy użyć testu chi-kwadrat opartego na statystyce deviance, opisanego w poprzednim zadaniu. Statystyka alternatywna odpowiada modelowi z zadania 3, rozważamy modele z podwójnymi i potrójnymi interakcjami.
+
+```{r}
+anova(m2, m1_2, test = "Chisq")
+```
+
+```{r}
+anova(m2, m1_3, test = "Chisq")
+```
+
+W obu przypadkach p-wartość jest większa od ustalonego poziomu istotności, nie mamy zatem podstaw do odrzucnia hipotezy zerowej. Przyjmujemy prostszy model z pogrupowanymi i kategorycznymi danymi.
+
+# Zadanie 5
+
+Model można zapisać następująco 
+
+$$
+log(\lambda_i) = \beta_0 + \beta_1x_{i,1} + \beta_2 x_{i,2} + \beta_3 x_{i,3} + \beta_4 x_{i,4} + \beta_5 x_{i,5} + \beta_6 x_{i,6}+ \beta_7 x_{i,7},
+$$
+gdzie
+
+$x_{i,1} = 1 \text{ jeśli i-ta obserwacja należy do przedziału czasowego } [12,16), 0 \text{ w przeciwnym przypadku},$  
+$x_{i,2} = 1$ jeśli i-ta obserwacja należy do przedziału czasowego $[16,20)$, 0 wpp,  
+$x_{i,3} = 1$ jeśli i-ta obserwacja należy do przedziału czasowego $[20,23)$, 0 wpp,  
+$x_{i,4} = 1$ jesli i-ta obserwacja została zmierzona w dzień roboczy, 0 wpp,  
+$x_{i,5} = 1$ jeśli i-ta obserwacja należy do przedziału czasowego $[12,16)$ i została zmierzona w dzień roboczy, 0 wpp,  
+$x_{i,6} = 1$ jeśli i-ta obserwacja należy do przedziału czasowego $[16, 20)$ i została zmierzona w dzień roboczy, 0 wpp,  
+$x_{i,7} = 1$ jeśli i-ta obserwacja należy do przedziału czasowego $[20, 23]$ i została zmierzona w dzień roboczy, 0 wpp,  
+
+Checemy znaleźć informacje dla grup
+```{r}
+s1 = expand.grid(c('0','1'), unique(df_sklep_new$timeslot))
+colnames(s1) = c("workingday", "timeslot")
+s1
+```
+
+Do znalezienia średniej i wartości $\eta_i$ możemy użyć funkcji $\texttt{predict}$
+```{r}
+# Średnia dla danych grup
+predict(m2, s1, type = "response")
+```
+
+```{r}
+predict(m2, s1)
+```
+
+```{r, echo=FALSE}
+s1= expand.grid(c('0','1'), unique(df_sklep_new$timeslot))
+colnames(s1) = c("workingday", "timeslot")
+r1 = sprintf("Dzień roboczy: %s, czas: %s", s1$workingday, s1$timeslot)
+r2 = round( predict(m2, s1, type = "response"), digits = 4)
+r3 = c("$\\hat{\\beta}_0$", 
+       "$\\hat{\\beta}_0 + \\hat{\\beta}_4 $", 
+       "$\\hat{\\beta}_0 + \\hat{\\beta}_1 $", 
+       "$\\hat{\\beta}_0 + \\hat{\\beta}_1  + \\hat{\\beta}_4 + \\hat{\\beta}_5$",
+       "$\\hat{\\beta}_0 + \\hat{\\beta}_2 $",
+       "$\\hat{\\beta}_0 + \\hat{\\beta}_2  + \\hat{\\beta}_4 + \\hat{\\beta}_6$",
+       "$\\hat{\\beta}_0 + \\hat{\\beta}_3 $",
+       "$\\hat{\\beta}_0 + \\hat{\\beta}_3  + \\hat{\\beta}_4 + \\hat{\\beta}_7$")
+r4 = round(predict(m2, s1), 4)
+res = cbind(s1,r2,r3, r4)
+res = res[order(res$workingday),]
+# colnames(res) = c("Grupa", "Średnia", "Postać $\\eta_i$", "Wartość $\\eta_i$")
+colnames(res) = c("Dzień roboczy","Czas", "Średnia", "Postać $\\eta_i$", "Wartość $\\eta_i$")
+```
+
+```{r, echo=FALSE}
+kbl(res, booktabs=T, escape=F, caption = "Grupy.", linesep = "") %>%
+    kable_styling(latex_options = c("hold_position"))
+```
+\newpage
+Możemy zaobserwować, że średnia liczba klientów w dni weekendowe jest bardzo podobna, niezależnie od godziny. W dni robocze najwięcej klientów jest w godzinach $[16, 20)$. 
+
+
+
+# Zadanie 6
+
+Chcemy sprawdzić czy predyktory liniowe odpowidające podgrupom godzin weekendowych są takie same. Testujemy:
+
+$$
+H_{0}: \beta_0 =  \beta_0 + \beta_1 =  \beta_0 + \beta_2 =  \beta_0 + \beta_3  \quad H_1: \text{ Przynajmniej jedna równość nie zachodzi.}
+$$
+Równoważnie 
+$$
+H_0:\beta_1 = \beta_2 = \beta_3 = 0 \qquad H_1: \exists_{i,j}\  \beta_i \neq \beta_j.
+$$
+Użyjemy testu Walda. Zdefiniujmy macierz $A_{3\times 8}$:
+
+$$
+A = \begin{pmatrix} 0 & 1 & 0 & 0 & 0 & 0 & 0 & 0 \\  0 & 0 & 1 & 0 & 0 & 0 & 0 & 0 \\  0 & 0 & 0 & 1 & 0 & 0 & 0 & 0 \\ \end{pmatrix}.
+$$
+Statystyka Walda dla naszego problemu testowania ma postać:
+$$
+(A\hat{\beta})'(A\  \widehat{\text{Cov}}(\hat{\beta}) A')^{-1}(A\hat{\beta}).
+$$
+Przy hipotezie zerowej rozkład statystyki zbiega do rozkladu $\chi^2$ z trzema stopniami swobody. Test Walda odrzuca $H_0$ gdy statystyka $W$ przyjmuje odpowiednio duże wartości. Dokładniej $H_0$ odrzucamy gdy $W$ jest większe niż kwantyl rzędu $1 - \alpha$ z rozkładu $\chi^2$ z trzema stopniami swobody. Za poziom istotności $\alpha$ obierzemy 0.05.
+
+
+```{r}
+A = matrix(c(0,1,0,0,0,0,0,0,  0,0,1,0,0,0,0,0,  0,0,0,1,0,0,0,0), nrow = 3, byrow = T)
+coefs_m2 = m2$coefficients
+W = t(A%*%coefs_m2) %*% solve(A%*%vcov(m2)%*%t(A)) %*% (A%*%coefs_m2)
+W > qchisq(1-0.05, df=3)
+```
+
+Możemy też policzyć p-wartość.
+
+```{r}
+1 - pchisq(W, df=3)
+```
+
+P-wartość jest większa od ustalonego poziomu istotności, nie mamy zatem podstaw aby odrzucić hipotezę zerową. Uznajemy więc, że rozważane predyktory liniowe sa równe. 
+
+
+# Zadanie 7
+
+Na podstawie wyników tabeli z zadania 5 zaplanujemy grafik pracowników przyjmując, że jeden pracownik może obsłużyć 20 klientów na godzinę. Ponieważ grafik mam byc na podstawie tabeli to zakładamy, że jedna zmiana trwa 4 godziny i podział dnia na zmiany jest taki sam jak w tabeli. Przyjmiemy dodatkowo, że pracownicy nie mogą pracować więcej niż 8 godzin dziennie, oraz nie więcej niż 40 godzin w tygodniu.  
+
+Zobaczmy najpierw ilu pracowników musi pracować w danych godzinach dnia roboczego oraz weekendowego
+
+| Godzina    | Pracownicy (roboczy) | Pracownicy (weekend)  |
+| ---------- |:--------------------:| ---------------------:|
+| [8, 12)    | 2                    | 1                     |
+| [12, 16)   | 1                    | 1                     |
+| [16, 20)   | 3                    | 1                     |
+| [20, 24)   | 2                    | 1                     |
+
+
+Możemy teraz obliczyć ile minimalnie pracowników musi pracować w sklepie. W dniu roboczym mamy całkowitą ilość 8 zmian, natomiast w weekend całkowita ilosć zmian to 4. Łącznie w tygodniu mamy więc $5*8 + 4*2 = 48$ zmian. Jeden pracownik może pracować na nie więcej niż 10 zmianach. Potrzebujemy zatem minimalnie 5 pracowników. Wystarczy teraz ułożyć grafik dla 5 pracowników, spełniający wszystkie założenia. Oznaczmy pracowników przez A, B, C, D, E.
+
+Godzina      | Pon     | Wt      | Śr      | Czw     | Pt      | Sob  | Nd   |
+| ---------- |:-------:|:-------:|:-------:|:-------:|:-------:|:----:| ----:|
+| [8, 12)    | A, B    | A, B    | A, B    | C, D    | C, D    | A    | A    |
+| [12, 16)   | E       | E       | E       | C       | C       | A    | A    |
+| [16, 20)   | C, D, E | C, D, E | C, D, E | D, A, E | D, A, E | B    | B    |
+| [20, 24)   | C, D    | C, D    | C, D    | A, E    | B, E    | B    | B    |
+
+
+
+
+
+
+
